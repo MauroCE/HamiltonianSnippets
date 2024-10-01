@@ -1,40 +1,42 @@
 import numpy as np
 
 
-def leapfrog(x, v, epsilons):
+def leapfrog(x, v, epsilons, gamma_curr, M_inv, compute_likelihoods_priors_gradients):
     """Leapfrog integration """
-    pass
+    N, Tplus1, d = x.shape
+    if len(epsilons.shape) == 1:
+        epsilons = epsilons[:, None]
 
+    # Initialize snippets, negative log priors and negative log likelihoods
+    znk = np.full((N, Tplus1, 2*d), np.nan)  # snippets
+    nlps = np.full((N, Tplus1), np.nan)  # negative log priors
+    nlls = np.full((N, Tplus1), np.nan)  # negative log likelihoods
+    znk[:, 0] = np.hstack((x, v))  # Fill with seed particles
 
-def integrate_forward(x, v, epsilons, params, gammas, n):
-    """Integrates forward performing Leapfrog integration, with a diagonal mass matrix, meaning that the
-    momenta need to be rescaled."""
-    N = params['N_particles']
-    T = params['T']
-    d = params['dim']
-    # Setup storage
-    trajectories = np.full((N, T+1, 2*d), np.nan)
-    trajectories[:, 0] = np.hstack((x, v))
-    # Store only the log densities (used for log-weights), not gradients
-    nlps = np.full((N, T+1), np.nan)   # Negative log priors
-    nlls = np.full((N, T+1), np.nan)   # Negative log-likelihoods
-    # First half-momentum step
-    nlps[:, 0], gnlps, nlls[:, 0], gnlls = nlp_gnlp_nll_and_gnll(x, params)
-    v = v - 0.5*epsilons[:, None]*(gnlps + gammas[n-1]*gnlls)  # (N, d)
-    # T-1 full position and momentum steps
-    for k in range(T - 1):
-        # Full position step with diagonal covariance matrix
-        x = x + epsilons[:, None]*(v * params['covariance_diag'])
-        # Full momentum step (compute nlls and gnlls)
-        nlps[:, k+1], gnlps, nlls[:, k+1], gnlls = nlp_gnlp_nll_and_gnll(x, params)
-        v = v - epsilons[:, None]*(gnlps + gammas[n-1]*gnlls)  # (N, 61)
-        # Store trajectory
-        trajectories[:, k+1] = np.hstack((x, v))
+    # First momentum half-step
+    nlps[:, 0], gnlps, nlls[:, 0], gnlls = compute_likelihoods_priors_gradients(x)
+    v = v - 0.5*epsilons*(gnlps + gamma_curr*gnlls)  # (N, d)
+
+    # T - 1 position and velocity full steps
+    for k in range(Tplus1 - 2):
+
+        # Full position step
+        x = x + epsilons*M_inv.dot(v.T).T
+
+        # Full momentum step
+        nlps[:, k+1], gnlps, nlls[:, k+1], gnlls = compute_likelihoods_priors_gradients(x)
+        v = v - epsilons*(gnlps + gamma_curr*gnlls)
+
+        # Store trajectories
+        znk[:, k+1] = np.hstack((x, v))
+
     # Final position half-step
-    x = x + epsilons[:, None]*(v * params['covariance_diag'])
+    x = x + epsilons*M_inv.dot(v.T).T
+
     # Final momentum half-step
-    nlps[:, -1], gnlps, nlls[:, -1], gnlls = nlp_gnlp_nll_and_gnll(x, params)
-    v = v - 0.5*epsilons[:, None]*(gnlps + gammas[n-1]*gnlls)  # (N, 61)
+    nlps[:, -1], gnlps, nlls[:, -1], gnlls = compute_likelihoods_priors_gradients(x)
+    v = v - 0.5*epsilons*(gnlps + gamma_curr*gnlls)
+
     # Store trajectories
-    trajectories[:, -1] = np.hstack((x, v))
-    return trajectories, nlps, nlls
+    znk[:, -1] = np.hstack((x, v))
+    return znk, nlps, nlls
