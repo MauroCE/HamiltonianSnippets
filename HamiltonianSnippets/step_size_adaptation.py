@@ -1,9 +1,10 @@
 import numpy as np
 from numpy.typing import NDArray
 from scipy.special import logsumexp
+from scipy.stats import invgauss
 
 
-def conditional_variance_criterion(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss: callable):
+def estimate_new_epsilon_mean(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss: callable):
     """Conditional variance criterion used for adaptation of the Leapfrog step size.
 
     Parameters
@@ -41,3 +42,10 @@ def conditional_variance_criterion(xnk: NDArray, logw: NDArray, epsilons: NDArra
     return np.exp(
         logsumexp(log_sq_norms + logw_filtered + log_T_eps) - logsumexp(log_sq_norms + logw_filtered)
     )  # scalar, conditional variance
+
+
+def sample_epsilons(epsilon_mean: float, N: int, rng: np.random.Generator):
+    """Samples epsilons from an inverse Gaussian distribution assuming a fixed skewness of 3."""
+    lambda_param = np.exp(3*np.log(epsilon_mean) - 2*np.log(epsilon_mean))  # eps_mean**3 / eps_var
+    mu_param = np.exp(np.log(epsilon_mean) - 3*np.log(epsilon_mean) + np.log(epsilon_mean))  # eps_mean / lambda_param
+    return invgauss.rvs(mu=mu_param, loc=0, scale=lambda_param, size=N, random_state=rng)  # (N, )
