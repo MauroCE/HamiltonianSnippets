@@ -1,11 +1,12 @@
 import numpy as np
 
 
-def leapfrog(x, v, epsilons, gamma_curr, M_inv, compute_likelihoods_priors_gradients):
+def leapfrog(x, v, epsilons, gamma_curr, inv_mass_diag, compute_likelihoods_priors_gradients):
     """Leapfrog integration """
     N, Tplus1, d = x.shape
     if len(epsilons.shape) == 1:
         epsilons = epsilons[:, None]
+    inv_mass_diag = inv_mass_diag[None, :]
 
     # Initialize snippets, negative log priors and negative log likelihoods
     znk = np.full((N, Tplus1, 2*d), np.nan)  # snippets
@@ -21,7 +22,7 @@ def leapfrog(x, v, epsilons, gamma_curr, M_inv, compute_likelihoods_priors_gradi
     for k in range(Tplus1 - 2):
 
         # Full position step
-        x = x + epsilons*M_inv.dot(v.T).T
+        x = x + epsilons*(v * inv_mass_diag)
 
         # Full momentum step
         nlps[:, k+1], gnlps, nlls[:, k+1], gnlls = compute_likelihoods_priors_gradients(x)
@@ -31,7 +32,7 @@ def leapfrog(x, v, epsilons, gamma_curr, M_inv, compute_likelihoods_priors_gradi
         znk[:, k+1] = np.hstack((x, v))
 
     # Final position half-step
-    x = x + epsilons*M_inv.dot(v.T).T
+    x = x + epsilons*(v * inv_mass_diag)
 
     # Final momentum half-step
     nlps[:, -1], gnlps, nlls[:, -1], gnlls = compute_likelihoods_priors_gradients(x)
