@@ -13,7 +13,7 @@ def compute_weights_and_ess(
         inv_mass_diag_curr: NDArray,
         gamma_next: float,
         gamma_curr: float,
-        ) -> Tuple[NDArray, NDArray, NDArray, NDArray, np.float]:
+        ) -> Tuple[NDArray, NDArray, NDArray, NDArray, float]:
     """Computes unfolded weights for an identity mass matrix.
 
     Parameters
@@ -47,7 +47,7 @@ def compute_weights_and_ess(
 
     # Log denominator of the unfolded weights
     log_den = (-nlps[:, 0]) + gamma_curr*(-nlls[:, 0])  # (N, )
-    log_den -= 0.5*np.sum((vnk**2) * inv_mass_diag_curr, axis=1)  # (N, )
+    log_den -= 0.5*np.sum((vnk[:, 0]**2) * inv_mass_diag_curr, axis=1)  # (N, )
     log_den += 0.5*np.sum(np.log(inv_mass_diag_curr))  # (N, )
 
     # Unfolded weights

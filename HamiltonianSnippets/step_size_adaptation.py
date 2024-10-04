@@ -47,5 +47,5 @@ def estimate_new_epsilon_mean(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss
 def sample_epsilons(epsilon_mean: float, N: int, rng: np.random.Generator):
     """Samples epsilons from an inverse Gaussian distribution assuming a fixed skewness of 3."""
     lambda_param = np.exp(3*np.log(epsilon_mean) - 2*np.log(epsilon_mean))  # eps_mean**3 / eps_var
-    mu_param = np.exp(np.log(epsilon_mean) - 3*np.log(epsilon_mean) + np.log(epsilon_mean))  # eps_mean / lambda_param
+    mu_param = np.exp(np.log(epsilon_mean) - 3*np.log(epsilon_mean) + 2*np.log(epsilon_mean))  # eps_mean / lambda_param
     return invgauss.rvs(mu=mu_param, loc=0, scale=lambda_param, size=N, random_state=rng)  # (N, )

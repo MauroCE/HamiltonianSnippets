@@ -4,14 +4,14 @@ from typing import Optional
 from numpy.typing import NDArray
 from scipy.special import logsumexp
 
-from leapfrog_integration import leapfrog
-from weight_computations import compute_weights_and_ess
-from step_size_adaptation import sample_epsilons, estimate_new_epsilon_mean
-from utils import next_annealing_param
+from .leapfrog_integration import leapfrog
+from .weight_computations import compute_weights_and_ess
+from .step_size_adaptation import sample_epsilons, estimate_new_epsilon_mean
+from .utils import next_annealing_param
 
 
 def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
-                        compute_likelihoods_priors_gradients: callable, verbose: bool = True,
+                        compute_likelihoods_priors_gradients: callable, adapt_mass: False, verbose: bool = True,
                         seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
@@ -33,6 +33,8 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
                                                  computes the negative log-likelihood, its gradient, the negative
                                                  log prior and its gradient at these positions
     :type compute_likelihoods_priors_gradients: callable
+    :param adapt_mass: Whether to adapt the mass matrix diaonal or not
+    :type adapt_mass: bool
     :param verbose: Whether to print progress of the algorithm
     :type verbose: bool
     :param seed: Seed for the random number generator
@@ -51,53 +53,67 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
     x = sample_prior(N, rng)
     d = x.shape[1]
     v = rng.normal(loc=0, scale=1, size=(N, d)) / np.sqrt(mass_diag)
+
+    # Initial step sizes and mass matrix
     epsilons = sample_epsilons(epsilon_mean=step_size, N=N, rng=rng)
     mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
-    mass_diag_next = mass_diag if mass_diag is not None else np.eye(d)
 
     # Storage
     epsilons_history = [epsilons]
     gammas = [0.0]
-    ess = [N]
+    ess_history = [N]
     logLt = 0.0
 
     while gammas[n-1] < 1.0:
-        verboseprint(f"Iteration {n} Gamma {gammas[n-1]}")
+        verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .3f} Avg Step Size: {step_size: .4f}")
 
         # Construct trajectories
-        xnk, vnk, nlps, nlls = leapfrog(x, v, epsilons, gammas[n-1], 1/mass_diag, compute_likelihoods_priors_gradients)
+        xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag, compute_likelihoods_priors_gradients)
+        verboseprint("\tTrajectories constructed.")
 
         # Select next tempering parameter based on target ESS
         gammas.append(next_annealing_param(gamma=gammas[n-1], ESSrmin=ESSrmin, llk=(-nlls[:, 0])))
+        verboseprint(f"\tNext gamma selected: {gammas[-1]: .5f}")
 
         # Estimate new mass matrix diagonal using importance sampling
-        W_mass_est, _, _, _, _ = compute_weights_and_ess(
-            vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1]
-        )
-        weighted_mean = np.average(xnk.reshape(-1, d), axis=0, weights=W_mass_est.ravel())  # (d, )
-        mass_diag_next = 1 / np.average((xnk.reshape(-1, d) - weighted_mean)**2, axis=0, weights=W_mass_est.ravel())
+        if adapt_mass:
+            W_mass_est, _, _, _, _ = compute_weights_and_ess(
+                vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1]
+            )
+            weighted_mean = np.average(xnk.reshape(-1, d), axis=0, weights=W_mass_est.ravel())  # (d, )
+            mass_diag_next = 1 / np.average((xnk.reshape(-1, d) - weighted_mean)**2, axis=0, weights=W_mass_est.ravel())
+            verboseprint(f"\tNew mass matrix diagonal estimated. Mean {mass_diag_next.mean()}")
+        else:
+            mass_diag_next = mass_diag_curr
 
         # Compute weights and ESS
         W_unfolded, logw_unfolded, W_folded, logw_folded, ess = compute_weights_and_ess(
             vnk, nlps, nlls, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1])
+        verboseprint(f"\tWeights Computed. Folded ESS {ess: .3f}")
 
         # Resample N particles out of N*(T+1) proportionally to unfolded weights
         A = rng.choice(a=N*(T+1), size=N, replace=True, p=W_unfolded.ravel())  # (N, )
         i_indices, k_indices = np.unravel_index(A, (N, T+1))  # (N, ) particles indices, (N, ) trajectory indices
         x = xnk[i_indices, k_indices]  # (N, d) resampled positions
+        verboseprint(f"\tParticles resampled. PM {np.sum(k_indices > 0) / N: .3f}")
 
         # Refresh velocities
         v = rng.normal(loc=0, scale=1, size=(N, d)) / np.sqrt(mass_diag)
+        verboseprint("\tVelocities refreshed.")
 
         # Compute log-normalizing constant estimates
         logLt += logsumexp(logw_folded) - np.log(N)
+        verboseprint(f"\tLogLt {logLt}")
 
         # Step size adaptation
         step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
         epsilons = sample_epsilons(epsilon_mean=step_size, N=N, rng=rng)
+        verboseprint(f"\tStep size adapted {step_size}")
 
         # Storage
         epsilons_history.append(epsilons)
-        ess.append(ess)
+        ess_history.append(ess)
+
+        n += 1
     runtime = time.time() - start_time
-    return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilons_history, "ess": ess}
+    return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilons_history, "ess": ess_history}
