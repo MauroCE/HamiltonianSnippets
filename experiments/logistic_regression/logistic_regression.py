@@ -28,7 +28,7 @@ def generate_sample_prior_function(_scales):
 
 if __name__ == "__main__":
     # Grab data
-    data = np.load("sonar.npy")
+    data = np.load("logistic_regression/sonar.npy")
     y = -data[:, 0]  # Shape (208,)
     Z = data[:, 1:]  # Shape (208, 61)
     scales = np.array([5] * 61)
@@ -43,10 +43,10 @@ if __name__ == "__main__":
     N = 500
     T = 30
     step_size = 0.001
-    mass_diag = np.ones(61)
+    mass_diag = 1 / scales**2
     verbose = True
     out = hamiltonian_snippet(N=N, T=T, step_size=step_size, mass_diag=mass_diag, ESSrmin=0.8,
                               sample_prior=sample_prior,
                               compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
-                              adapt_mass=False,
+                              adapt_mass=True,
                               verbose=verbose, seed=seed)
