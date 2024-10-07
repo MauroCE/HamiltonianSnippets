@@ -52,7 +52,7 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
     # Initialize particles, epsilons
     x = sample_prior(N, rng)
     d = x.shape[1]
-    v = rng.normal(loc=0, scale=1, size=(N, d)) / np.sqrt(mass_diag)
+    v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag)
 
     # Initial step sizes and mass matrix
     epsilons = sample_epsilons(epsilon_mean=step_size, N=N, rng=rng)
@@ -68,7 +68,7 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .3f} Avg Step Size: {step_size: .4f}")
 
         # Construct trajectories
-        xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag, compute_likelihoods_priors_gradients)
+        xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
         verboseprint("\tTrajectories constructed.")
 
         # Select next tempering parameter based on target ESS
@@ -91,6 +91,9 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
             vnk, nlps, nlls, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1])
         verboseprint(f"\tWeights Computed. Folded ESS {ess: .3f}")
 
+        # Set the new cov matrix to the old one
+        mass_diag_curr = mass_diag_next
+
         # Resample N particles out of N*(T+1) proportionally to unfolded weights
         A = rng.choice(a=N*(T+1), size=N, replace=True, p=W_unfolded.ravel())  # (N, )
         i_indices, k_indices = np.unravel_index(A, (N, T+1))  # (N, ) particles indices, (N, ) trajectory indices
@@ -98,7 +101,7 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
         verboseprint(f"\tParticles resampled. PM {np.sum(k_indices > 0) / N: .3f}")
 
         # Refresh velocities
-        v = rng.normal(loc=0, scale=1, size=(N, d)) / np.sqrt(mass_diag)
+        v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
         verboseprint("\tVelocities refreshed.")
 
         # Compute log-normalizing constant estimates

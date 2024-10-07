@@ -39,11 +39,11 @@ if __name__ == "__main__":
     compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function(_y=y, _Z=Z, _scales=scales)
 
     # Run Hamiltonian snippets
-    seed = 1234
+    seed = 1234  # np.random.randint(low=0, high=10000000000)
     N = 500
     T = 30
-    step_size = 0.001
-    mass_diag = 1 / scales**2
+    step_size = 0.01
+    mass_diag = 1 / scales**2  # np.ones(61)  # 1 / scales**2
     verbose = True
     out = hamiltonian_snippet(N=N, T=T, step_size=step_size, mass_diag=mass_diag, ESSrmin=0.8,
                               sample_prior=sample_prior,
