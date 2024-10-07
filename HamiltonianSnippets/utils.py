@@ -40,3 +40,8 @@ def next_annealing_param(gamma: float, ESSrmin: float, llk) -> float:
         return gamma + brentq(f, 0.0, 1.0 - gamma)
     else:
         return 1.0
+
+
+def eps_to_str(epsilon):
+    """Simply replace . with 'dot'"""
+    return str(float(epsilon)).replace(".", "dot")

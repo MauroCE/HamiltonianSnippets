@@ -11,8 +11,8 @@ from .utils import next_annealing_param
 
 
 def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
-                        compute_likelihoods_priors_gradients: callable, adapt_mass: False, verbose: bool = True,
-                        seed: Optional[int] = None):
+                        compute_likelihoods_priors_gradients: callable, set_overflow_weights_to_zero: bool = False,
+                        adapt_mass: bool = False, verbose: bool = True, seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
     Parameters
@@ -33,7 +33,10 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
                                                  computes the negative log-likelihood, its gradient, the negative
                                                  log prior and its gradient at these positions
     :type compute_likelihoods_priors_gradients: callable
-    :param adapt_mass: Whether to adapt the mass matrix diaonal or not
+    :param set_overflow_weights_to_zero: If True, then whenever we find an overflow in the trajectories, we set the
+                                         corresponding unfolded weights to zero.
+    :type set_overflow_weights_to_zero: bool
+    :param adapt_mass: Whether to adapt the mass matrix diagonal or not
     :type adapt_mass: bool
     :param verbose: Whether to print progress of the algorithm
     :type verbose: bool
@@ -59,10 +62,12 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
     mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
 
     # Storage
-    epsilons_history = [epsilons]
+    epsilon_history = [epsilons]
+    epsilon_means = [step_size]
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
+    overflow = False
 
     while gammas[n-1] < 1.0:
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .3f} Avg Step Size: {step_size: .4f}")
@@ -71,12 +76,16 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
         xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
         verboseprint("\tTrajectories constructed.")
 
+        # Check if there is any inf due to overflow error
+        if not (np.all(np.isfinite(xnk)) and np.all(np.isfinite(vnk))):
+            overflow = True
+
         # Select next tempering parameter based on target ESS
         gammas.append(next_annealing_param(gamma=gammas[n-1], ESSrmin=ESSrmin, llk=(-nlls[:, 0])))
         verboseprint(f"\tNext gamma selected: {gammas[-1]: .5f}")
 
         # Estimate new mass matrix diagonal using importance sampling
-        if adapt_mass:
+        if adapt_mass and not overflow:
             W_mass_est, _, _, _, _ = compute_weights_and_ess(
                 vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1]
             )
@@ -114,9 +123,11 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
         verboseprint(f"\tStep size adapted {step_size}")
 
         # Storage
-        epsilons_history.append(epsilons)
+        epsilon_history.append(epsilons)
+        epsilon_means.append(step_size)
         ess_history.append(ess)
 
         n += 1
     runtime = time.time() - start_time
-    return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilons_history, "ess": ess_history}
+    return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilon_history, "ess": ess_history,
+            'epsilon_means': epsilon_means}
