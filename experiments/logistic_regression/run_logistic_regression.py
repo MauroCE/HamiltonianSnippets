@@ -58,18 +58,26 @@ if __name__ == "__main__":
     for i in range(n_runs):
         print(f"Run: {i}")
         for eps_ix, eps in enumerate(step_sizes):
-            res = {'N': N, 'T': T, 'epsilon': eps}
-            out = hamiltonian_snippet(N=N, T=T, step_size=eps, mass_diag=mass_diag, ESSrmin=0.8,
+            epsilon_params = {
+                'distribution': 'inv_gauss',
+                'skewness': skewness,
+                'mean': eps,
+                'params_to_estimate': {'mean': lambda epsilon: epsilon},
+                'to_print': 'mean'
+            }
+            res = {'N': N, 'T': T, 'epsilon_params': epsilon_params}
+            out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
                                       sample_prior=sample_prior,
-                                      skewness=skewness,
+                                      epsilon_params=epsilon_params,
                                       compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
                                       adapt_mass=mass_matrix_adaptation,
                                       verbose=verbose, seed=seeds[i])
             res.update({'logLt': out['logLt'], 'out': out})
             print(f"\t\tEps: {eps: .7f} \tLogLt: {out['logLt']: .1f} \tFinal ESS: {out['ess'][-1]: .1f}"
-                  f"\tEps Mean: {out['epsilon_means'][-1]: .3f} Seed {int(seeds[i])} ")
+                  f"\tEps {epsilon_params['to_print'].capitalize()}: "
+                  f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
             results.append(res)
 
     # Save results
-    with open(f"logistic_regression/results/seed{overall_seed}_N{N}_T{T}_mass{mass_matrix_adaptation}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
-        pickle.dump(results, file)
+    # with open(f"logistic_regression/results/seed{overall_seed}_N{N}_T{T}_mass{mass_matrix_adaptation}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
+    #     pickle.dump(results, file)

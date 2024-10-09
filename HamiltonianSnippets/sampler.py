@@ -6,12 +6,12 @@ from scipy.special import logsumexp
 
 from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
-from .step_size_adaptation import sample_epsilons, estimate_new_epsilon_mean
+from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .utils import next_annealing_param
 
 
-def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
-                        compute_likelihoods_priors_gradients: callable, skewness: float = 3,
+def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
+                        compute_likelihoods_priors_gradients: callable, epsilon_params: dict,
                         adapt_mass: bool = False, verbose: bool = True, seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
@@ -21,8 +21,6 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
     :type N: int
     :param T: Number of integration steps
     :type T: int
-    :param step_size: Step size for leapfrog integration
-    :type step_size: float
     :param mass_diag: Diagonal of the mass matrix
     :type mass_diag: np.ndarray
     :param ESSrmin: Proportion of `N` that we target as our ESS when finding the next tempering parameter
@@ -33,8 +31,9 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
                                                  computes the negative log-likelihood, its gradient, the negative
                                                  log prior and its gradient at these positions
     :type compute_likelihoods_priors_gradients: callable
-    :param skewness: Skewness value for the inverse gaussian distribution, used for sampling epsilons. Must be positive
-    :type skewness: float
+    :param epsilon_params: Parameters for the distribution of the epsilons. Should be a dictionary containing
+                           'distribution' which should be one of `['inv_gauss']` and parameters for them
+    :type epsilon_params: dict
     :param adapt_mass: Whether to adapt the mass matrix diagonal or not
     :type adapt_mass: bool
     :param verbose: Whether to print progress of the algorithm
@@ -57,18 +56,18 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
     v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag)
 
     # Initial step sizes and mass matrix
-    epsilons = sample_epsilons(epsilon_mean=step_size, skewness=skewness, N=N, rng=rng)
+    epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
     mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
 
     # Storage
     epsilon_history = [epsilons]
-    epsilon_means = [step_size]
+    epsilon_params_history = [epsilon_params]  # parameters for the epsilon distribution
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
 
     while gammas[n-1] < 1.0:
-        verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .3f} Avg Step Size: {step_size: .4f}")
+        verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .3f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]: .4f}")
 
         # Construct trajectories
         xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
@@ -122,16 +121,19 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
 
         # Step size adaptation
         xnk[overflow_mask] = 0.0
-        step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
-        epsilons = sample_epsilons(epsilon_mean=step_size, skewness=skewness, N=N, rng=rng)
-        verboseprint(f"\tStep size adapted {step_size}")
+        epsilon_params.update(estimate_with_cond_variance(
+            xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate']
+        ))
+        # step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
+        epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
+        verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
 
         # Storage
         epsilon_history.append(epsilons)
-        epsilon_means.append(step_size)
+        epsilon_params_history.append(epsilon_params)
         ess_history.append(ess)
 
         n += 1
     runtime = time.time() - start_time
     return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilon_history, "ess": ess_history,
-            'epsilon_means': epsilon_means}
+            'epsilon_params_history': epsilon_params_history}
