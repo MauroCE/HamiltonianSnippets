@@ -2,10 +2,9 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.special import logsumexp
 from scipy.stats import invgauss
-from typing import List
 
 
-def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss_dict: List[callable]) -> NDArray:
+def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss_dict: dict) -> NDArray:
     """Estimates a sufficient statistics using the conditional variance.
 
     Parameters
@@ -41,14 +40,14 @@ def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, 
     # Base flag
     base_flag = (norms > 0) & (logw > -np.inf)
 
-    estimators = {key: 0 for key in ss_dict}
+    estimators = {key: 0 for key in ss_dict.keys()}
     for param_name, ss in ss_dict.items():
         # Compute the test statistics for each snippet/epsilon
         T_hat = ss(epsilons)[:, None]   # (N, 1)
         # Compute terms of the form np.sum(sq_norms * w * T_eps) in a way to avoid numerical errors on the log scale
         T_hat_repeated = np.tile(T_hat, (T+1))  # (N, T+1)
         # Flag for when computation can be "logged"
-        flag = base_flag & (T_hat_repeated > 0)  # (N, T+1) when computation is not zero
+        flag = base_flag & (T_hat_repeated != 0)  # (N, T+1) when computation is not zero
         # log of squared norms, computed only where computation is not zero
         log_sq_norms = 2*np.log(norms[flag])
         # Same for log weights and estimator

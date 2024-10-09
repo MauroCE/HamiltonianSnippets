@@ -53,11 +53,11 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     # Initialize particles, epsilons
     x = sample_prior(N, rng)
     d = x.shape[1]
-    v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag)
+    mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
+    v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
 
     # Initial step sizes and mass matrix
     epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
-    mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
 
     # Storage
     epsilon_history = [epsilons]

@@ -6,11 +6,11 @@ import pandas as pd
 from numba import jit
 
 
-def generate_sample_prior_function(dim, mu_mean, l_covar):
+def generate_sample_prior_function(dim, mu, l_covar):
     """Samples from the prior distribution."""
     def sample_prior_function(n_particles, random_number_generator):
         white_noise = random_number_generator.normal(loc=0.0, scale=1.0, size=(n_particles, dim))
-        return white_noise.dot(l_covar) + mu_mean.flatten()
+        return white_noise.dot(l_covar.T) + mu
     return sample_prior_function
 
 
@@ -28,10 +28,7 @@ def covariance_function(i, j, i_prime, j_prime, beta, sigma2, dim):
     Returns:
     - res: Covariance value between the two points.
     """
-    exponent1 = ((i - i_prime) ** 2) + ((j - j_prime) ** 2)
-    exponent2 = -np.sqrt(exponent1)
-    res = sigma2 * np.exp(exponent2 / (np.sqrt(dim) * beta))
-    return res
+    return sigma2 * np.exp(-np.sqrt(((i - i_prime) ** 2) + ((j - j_prime) ** 2)) / (np.sqrt(dim) * beta))
 
 
 @jit(nopython=True)
@@ -98,6 +95,10 @@ def create_log_cox_parameters(N):
     covar_reshaped = covariance_matrix.reshape(dim, dim)
     inv_covar = np.linalg.inv(covar_reshaped)
 
+    # Metric tensor
+    metric_tensor = inv_covar
+    np.fill_diagonal(metric_tensor, (1/dim)*np.exp(mu + 0.5*np.diag(covar_reshaped)) + np.diag(inv_covar))
+
     # Define parameters dictionary
     parameters = {
         'N': N,
@@ -110,7 +111,9 @@ def create_log_cox_parameters(N):
         'inv_covar': inv_covar,
         'lognormconst_prior': -0.5 * np.linalg.slogdet(covar_reshaped)[1] - 0.5 * dim * np.log(2 * np.pi),
         'l_covar': np.linalg.cholesky(covar_reshaped),
-        'Y': make_grid(pd.read_csv('df_pines.csv'), N)[:, np.newaxis]
+        'Y': make_grid(pd.read_csv('df_pines.csv'), N)[:, np.newaxis],
+        'metric_tensor': metric_tensor,
+        'inv_metric_tensor': np.linalg.inv(metric_tensor)
     }
     return parameters
 
@@ -150,19 +153,30 @@ if __name__ == "__main__":
     # Load data and parameters
     grid_dim = 400
     params = create_log_cox_parameters(N=int(grid_dim**0.5))
-    mass_diag = 1 / np.diag(params['covar'])
+    # M = Sigma^{-1} + (1/grid_dim)*exp(mu + Sigma_diag)
+    # Sigma_diag = np.diag(params['covar'])
+    # mass_diag = (1 / Sigma_diag) + (1/grid_dim)*np.exp(params['mu'] + Sigma_diag)
+    mass_diag = np.diag(params['metric_tensor'])
+    # mass_diag = #np.ones(grid_dim)  # 1 / np.diag(params['covar'])
 
     # Instantiate functions
-    sample_prior = generate_sample_prior_function(dim=grid_dim, mu_mean=params['mu_mean'], l_covar=params['l_covar'])
+    sample_prior = generate_sample_prior_function(dim=grid_dim, mu=params['mu'], l_covar=params['l_covar'])
 
     # Settings
     N = 500
     T = 30
     skewness = 1
+    epsilon_params = {
+        'distribution': 'inv_gauss',
+        'skewness': skewness,
+        'mean': 0.01,
+        'params_to_estimate': {'mean': lambda epsilon: epsilon},
+        'to_print': 'mean'
+    }
 
-    out = hamiltonian_snippet(N=N, T=T, step_size=0.01, mass_diag=mass_diag, ESSrmin=0.8, sample_prior=sample_prior,
+    out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8, sample_prior=sample_prior,
                               compute_likelihoods_priors_gradients=lambda x: nlp_gnlp_nll_and_gnll(x, params),
-                              skewness=skewness,
-                              adapt_mass=True, verbose=True, seed=1234)
+                              epsilon_params=epsilon_params,
+                              adapt_mass=False, verbose=True, seed=1234)
 
 

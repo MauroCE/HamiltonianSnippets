@@ -1,5 +1,3 @@
-import os
-
 import numpy as np
 from HamiltonianSnippets.sampler import hamiltonian_snippet
 from HamiltonianSnippets.utils import eps_to_str
@@ -46,7 +44,7 @@ if __name__ == "__main__":
     n_runs = 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = np.geomspace(start=0.001, stop=10.0, num=9)
+    step_sizes = np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
     N = 500
     T = 30
     skewness = 3  # a large skewness helps avoiding a large bias
