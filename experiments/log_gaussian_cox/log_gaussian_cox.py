@@ -150,7 +150,7 @@ if __name__ == "__main__":
     # Load data and parameters
     grid_dim = 400
     params = create_log_cox_parameters(N=int(grid_dim**0.5))
-    mass_diag = np.diag(params['covar'])
+    mass_diag = 1 / np.diag(params['covar'])
 
     # Instantiate functions
     sample_prior = generate_sample_prior_function(dim=grid_dim, mu_mean=params['mu_mean'], l_covar=params['l_covar'])
@@ -158,9 +158,11 @@ if __name__ == "__main__":
     # Settings
     N = 500
     T = 30
+    skewness = 1
 
-    out = hamiltonian_snippet(N=N, T=T, step_size=0.1, mass_diag=mass_diag, ESSrmin=0.8, sample_prior=sample_prior,
+    out = hamiltonian_snippet(N=N, T=T, step_size=0.01, mass_diag=mass_diag, ESSrmin=0.8, sample_prior=sample_prior,
                               compute_likelihoods_priors_gradients=lambda x: nlp_gnlp_nll_and_gnll(x, params),
+                              skewness=skewness,
                               adapt_mass=True, verbose=True, seed=1234)
 
 

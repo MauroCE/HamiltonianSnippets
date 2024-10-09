@@ -5,13 +5,13 @@ from numpy.typing import NDArray
 from scipy.special import logsumexp
 
 from .leapfrog_integration import leapfrog
-from .weight_computations import compute_weights_and_ess
+from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_new_epsilon_mean
 from .utils import next_annealing_param
 
 
 def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
-                        compute_likelihoods_priors_gradients: callable, set_overflow_weights_to_zero: bool = False,
+                        compute_likelihoods_priors_gradients: callable, skewness: float = 3,
                         adapt_mass: bool = False, verbose: bool = True, seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
@@ -33,9 +33,8 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
                                                  computes the negative log-likelihood, its gradient, the negative
                                                  log prior and its gradient at these positions
     :type compute_likelihoods_priors_gradients: callable
-    :param set_overflow_weights_to_zero: If True, then whenever we find an overflow in the trajectories, we set the
-                                         corresponding unfolded weights to zero.
-    :type set_overflow_weights_to_zero: bool
+    :param skewness: Skewness value for the inverse gaussian distribution, used for sampling epsilons. Must be positive
+    :type skewness: float
     :param adapt_mass: Whether to adapt the mass matrix diagonal or not
     :type adapt_mass: bool
     :param verbose: Whether to print progress of the algorithm
@@ -58,7 +57,7 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
     v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag)
 
     # Initial step sizes and mass matrix
-    epsilons = sample_epsilons(epsilon_mean=step_size, N=N, rng=rng)
+    epsilons = sample_epsilons(epsilon_mean=step_size, skewness=skewness, N=N, rng=rng)
     mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
 
     # Storage
@@ -67,7 +66,6 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
-    overflow = False
 
     while gammas[n-1] < 1.0:
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .3f} Avg Step Size: {step_size: .4f}")
@@ -78,26 +76,31 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
 
         # Check if there is any inf due to overflow error
         if not (np.all(np.isfinite(xnk)) and np.all(np.isfinite(vnk))):
-            overflow = True
+            overflow_mask = np.any(~np.isfinite(xnk), axis=2) | np.any(~np.isfinite(vnk), axis=2)  # (N, T+1)
+            verboseprint(f"\tOverflow Detected. Trajectories affected: {overflow_mask.any(axis=1).sum()}")
+        else:
+            overflow_mask = np.zeros((N, T+1), dtype=bool)
 
         # Select next tempering parameter based on target ESS
         gammas.append(next_annealing_param(gamma=gammas[n-1], ESSrmin=ESSrmin, llk=(-nlls[:, 0])))
         verboseprint(f"\tNext gamma selected: {gammas[-1]: .5f}")
 
         # Estimate new mass matrix diagonal using importance sampling
-        if adapt_mass and not overflow:
-            W_mass_est, _, _, _, _ = compute_weights_and_ess(
-                vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1]
+        if adapt_mass:
+            W_mass_est, _, _, _ = compute_weights(
+                vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1],
+                overflow_mask=overflow_mask
             )
-            weighted_mean = np.average(xnk.reshape(-1, d), axis=0, weights=W_mass_est.ravel())  # (d, )
-            mass_diag_next = 1 / np.average((xnk.reshape(-1, d) - weighted_mean)**2, axis=0, weights=W_mass_est.ravel())
+            weighted_mean = np.average(xnk.reshape(-1, d)[~overflow_mask.ravel()], axis=0, weights=W_mass_est.ravel()[~overflow_mask.ravel()])  # (d, )
+            mass_diag_next = 1 / np.average((xnk.reshape(-1, d)[~overflow_mask.ravel()] - weighted_mean)**2, axis=0, weights=W_mass_est.ravel()[~overflow_mask.ravel()])
             verboseprint(f"\tNew mass matrix diagonal estimated. Mean {mass_diag_next.mean()}")
         else:
             mass_diag_next = mass_diag_curr
 
         # Compute weights and ESS
-        W_unfolded, logw_unfolded, W_folded, logw_folded, ess = compute_weights_and_ess(
-            vnk, nlps, nlls, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1])
+        W_unfolded, logw_unfolded, W_folded, logw_folded = compute_weights(
+            vnk, nlps, nlls, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1], overflow_mask=overflow_mask)
+        ess = 1 / np.sum(W_folded**2)  # folded ESS
         verboseprint(f"\tWeights Computed. Folded ESS {ess: .3f}")
 
         # Set the new cov matrix to the old one
@@ -118,8 +121,9 @@ def hamiltonian_snippet(N: int, T: int, step_size: float, mass_diag: NDArray, ES
         verboseprint(f"\tLogLt {logLt}")
 
         # Step size adaptation
+        xnk[overflow_mask] = 0.0
         step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
-        epsilons = sample_epsilons(epsilon_mean=step_size, N=N, rng=rng)
+        epsilons = sample_epsilons(epsilon_mean=step_size, skewness=skewness, N=N, rng=rng)
         verboseprint(f"\tStep size adapted {step_size}")
 
         # Storage

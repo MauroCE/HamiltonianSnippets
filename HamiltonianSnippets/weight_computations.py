@@ -1,11 +1,10 @@
 import numpy as np
 from numpy.typing import NDArray
 from scipy.special import logsumexp
-from scipy.linalg import norm
 from typing import Tuple
 
 
-def compute_weights_and_ess(
+def compute_weights(
         vnk: NDArray,
         nlps: NDArray,
         nlls: NDArray,
@@ -13,8 +12,9 @@ def compute_weights_and_ess(
         inv_mass_diag_curr: NDArray,
         gamma_next: float,
         gamma_curr: float,
-        ) -> Tuple[NDArray, NDArray, NDArray, NDArray, float]:
-    """Computes unfolded weights for an identity mass matrix.
+        overflow_mask: NDArray,
+        ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
+    """Computes unfolded and folded weights.
 
     Parameters
     ----------
@@ -32,33 +32,39 @@ def compute_weights_and_ess(
     :type gamma_next: float
     :param gamma_curr: Tempering parameter $\\gamma_{n-1}$ for the current distribution, will be used in the denominator
     :type gamma_curr: float
-    :return: Tuple containing `(W_unfolded, logw_unfolded, W_folded, logw_unfolded, folded_ess)`
-    :rtype: tuple(numpy.array, numpy.array, numpy.array, numpy.array, float)
+    :param overflow_mask: Mask indicating where there has been an overflow either in xnk or vnk. There we do not
+                          compute a weight, it will be set to zero. Will have shape (N, T+1).
+    :type overflow_mask: numpy.ndarray
+    :return: Tuple containing `(W_unfolded, logw_unfolded, W_folded, logw_unfolded)`
+    :rtype: tuple(numpy.array, numpy.array, numpy.array, numpy.array)
     """
     assert len(vnk.shape) == 3, "Velocities must be a 3-dimensional array."
     assert len(nlps.shape) == 2, "Negative log priors must be a 2-dimensional array."
     assert len(nlls.shape) == 2, "Negative log likelihoods must be a 2-dimensional array."
     N, Tplus1, d = vnk.shape
 
-    # Log numerator of the unfolded weights
-    log_num = (-nlps) + gamma_next*(-nlls)  # (N, T+1)
-    log_num -= 0.5*np.sum(inv_mass_diag_next * vnk.reshape(-1, d)**2, axis=1).reshape(N, Tplus1)  # (N, T+1)
-    log_num += 0.5*np.sum(np.log(inv_mass_diag_next))  # (N, T+1)
+    ofm = overflow_mask.ravel()  # (N*(T+1), ) boolean mask, True if corresponding xnk or vnk is inf due to overflow
+    ofm_seed = overflow_mask[:, 0].ravel()  # (N, ) same mask but only for seed particles
 
-    # Log denominator of the unfolded weights
-    log_den = (-nlps[:, 0]) + gamma_curr*(-nlls[:, 0])  # (N, )
-    log_den -= 0.5*np.sum((vnk[:, 0]**2) * inv_mass_diag_curr, axis=1)  # (N, )
-    log_den += 0.5*np.sum(np.log(inv_mass_diag_curr))  # (N, )
+    log_num = np.ones(N*Tplus1)
+    log_den = np.zeros(N)
+
+    # Log numerator of the unfolded weights
+    log_num[~ofm] = (-nlps.ravel()[~ofm]) + gamma_next*(-nlls.ravel()[~ofm])
+    log_num[~ofm] -= 0.5*np.sum(inv_mass_diag_next * vnk.reshape(-1, d)[~ofm]**2, axis=1)
+    log_num[~ofm] += 0.5*np.sum(np.log(inv_mass_diag_next))
+
+    # Log Denominator of the unfolded weights
+    log_den[~ofm_seed] = (-nlps[~ofm_seed, 0]) + gamma_curr*(-nlls[~ofm_seed, 0])
+    log_den[~ofm_seed] -= 0.5*np.sum((vnk[~ofm_seed, 0]**2) * inv_mass_diag_curr, axis=1)
+    log_den[~ofm_seed] += 0.5*np.sum(np.log(inv_mass_diag_curr))
 
     # Unfolded weights
-    logw_unfolded = log_num - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
+    logw_unfolded = log_num.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
     W_unfolded = np.exp(logw_unfolded - logsumexp(logw_unfolded))  # (N, T+1) normalized unfolded weights
 
     # Folded weights
     logw_folded = logsumexp(logw_unfolded, axis=1) - np.log(Tplus1)  # (N, ) un-normalized folded weights
     W_folded = np.exp(logw_folded - logsumexp(logw_folded))  # (N, ) normalized folded weights
 
-    # Folded ESS
-    ess = 1 / np.sum(W_folded**2)
-
-    return W_unfolded, logw_unfolded, W_folded, logw_folded, ess
+    return W_unfolded, logw_unfolded, W_folded, logw_folded
