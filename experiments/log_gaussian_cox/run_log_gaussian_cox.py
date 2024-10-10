@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 from HamiltonianSnippets.sampler import hamiltonian_snippet
 from HamiltonianSnippets.utils import eps_to_str
@@ -153,30 +155,49 @@ if __name__ == "__main__":
     # Load data and parameters
     grid_dim = 400
     params = create_log_cox_parameters(N=int(grid_dim**0.5))
-    # M = Sigma^{-1} + (1/grid_dim)*exp(mu + Sigma_diag)
-    # Sigma_diag = np.diag(params['covar'])
-    # mass_diag = (1 / Sigma_diag) + (1/grid_dim)*np.exp(params['mu'] + Sigma_diag)
     mass_diag = np.diag(params['metric_tensor'])
-    # mass_diag = #np.ones(grid_dim)  # 1 / np.diag(params['covar'])
 
     # Instantiate functions
     sample_prior = generate_sample_prior_function(dim=grid_dim, mu=params['mu'], l_covar=params['l_covar'])
 
+    n_runs = 20
+    overall_seed = np.random.randint(low=0, high=10000000000)
+    seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
+    step_sizes = np.array(np.geomspace(start=0.001, stop=1.0, num=9, endpoint=False))  # np.array() used only for pylint
+
     # Settings
     N = 500
-    T = 30
-    skewness = 1
-    epsilon_params = {
-        'distribution': 'inv_gauss',
-        'skewness': skewness,
-        'mean': 0.01,
-        'params_to_estimate': {'mean': lambda epsilon: epsilon},
-        'to_print': 'mean'
-    }
+    T = 20
+    skewness = 3
 
-    out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8, sample_prior=sample_prior,
-                              compute_likelihoods_priors_gradients=lambda x: nlp_gnlp_nll_and_gnll(x, params),
-                              epsilon_params=epsilon_params,
-                              adapt_mass=False, verbose=True, seed=1234)
+    results = []
+    for i in range(n_runs):
+        print(f"Run: {i}")
+        for eps_ix, eps in enumerate(step_sizes):
+            epsilon_params = {
+                'distribution': 'inv_gauss',
+                'skewness': skewness,
+                'mean': eps,
+                'params_to_estimate': {'mean': lambda epsilon: epsilon},
+                'to_print': 'mean'
+            }
+            res = {'N': N, 'T': T, 'epsilon': epsilon_params['mean']}
+            try:
+                out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
+                                          sample_prior=sample_prior,
+                                          epsilon_params=epsilon_params,
+                                          compute_likelihoods_priors_gradients=lambda x: nlp_gnlp_nll_and_gnll(x, params),
+                                          adapt_mass=False,
+                                          verbose=False, seed=seeds[i])
+                print(f"\t\tEps: {eps: .7f} \tLogLt: {out['logLt']: .1f} \tFinal ESS: {out['ess'][-1]: .1f}"
+                      f"\tEps {epsilon_params['to_print'].capitalize()}: "
+                      f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
+            except (ValueError, OverflowError):
+                out = {"logLt": np.nan, "gammas": [], "runtime": np.nan, "epsilons": [], "ess": [], 'epsilon_params_history': []}
+                print("\t\tFailed.")
+            res.update({'logLt': out['logLt'], 'out': out})
+            results.append(res)
 
+    with open(f"results/cox{grid_dim}_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
+        pickle.dump(results, file)
 

@@ -46,7 +46,7 @@ def compute_weights(
     ofm = overflow_mask.ravel()  # (N*(T+1), ) boolean mask, True if corresponding xnk or vnk is inf due to overflow
     ofm_seed = overflow_mask[:, 0].ravel()  # (N, ) same mask but only for seed particles
 
-    log_num = np.ones(N*Tplus1)
+    log_num = np.repeat(-np.inf, N*Tplus1)  # np.ones(N*Tplus1)
     log_den = np.zeros(N)
 
     # Log numerator of the unfolded weights
@@ -62,6 +62,9 @@ def compute_weights(
     # Unfolded weights
     logw_unfolded = log_num.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
     W_unfolded = np.exp(logw_unfolded - logsumexp(logw_unfolded))  # (N, T+1) normalized unfolded weights
+
+    # Overflown should lead to zero weights
+    assert W_unfolded[overflow_mask].sum() == 0, "Weights should be zero."
 
     # Folded weights
     logw_folded = logsumexp(logw_unfolded, axis=1) - np.log(Tplus1)  # (N, ) un-normalized folded weights

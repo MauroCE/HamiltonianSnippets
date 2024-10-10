@@ -61,7 +61,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
 
     # Storage
     epsilon_history = [epsilons]
-    epsilon_params_history = [epsilon_params]  # parameters for the epsilon distribution
+    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key != 'params_to_estimate'}]  # parameters for the epsilon distribution
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
@@ -130,7 +130,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
 
         # Storage
         epsilon_history.append(epsilons)
-        epsilon_params_history.append(epsilon_params)
+        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key != 'params_to_estimate'})
         ess_history.append(ess)
 
         n += 1
