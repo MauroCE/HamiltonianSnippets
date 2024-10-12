@@ -12,7 +12,9 @@ from .utils import next_annealing_param
 
 def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
                         compute_likelihoods_priors_gradients: callable, epsilon_params: dict,
-                        adapt_mass: bool = False, verbose: bool = True, seed: Optional[int] = None):
+                        act_on_overflow: bool = False, adapt_step_size: bool = False,
+                        skip_overflown: bool = False, adapt_mass: bool = False, verbose: bool = True,
+                        seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
     Parameters
@@ -34,6 +36,12 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :param epsilon_params: Parameters for the distribution of the epsilons. Should be a dictionary containing
                            'distribution' which should be one of `['inv_gauss']` and parameters for them
     :type epsilon_params: dict
+    :param act_on_overflow: Whether to use contingency measures in epsilon_params['on_overflow'] when overflow found
+    :type act_on_overflow: bool
+    :param adapt_step_size: Whether to adapt the leapfrog step size
+    :type adapt_step_size: bool
+    :param skip_overflown: Whether to skip overflown trajectories when estimating epsilon
+    :type skip_overflown: bool
     :param adapt_mass: Whether to adapt the mass matrix diagonal or not
     :type adapt_mass: bool
     :param verbose: Whether to print progress of the algorithm
@@ -61,22 +69,29 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
 
     # Storage
     epsilon_history = [epsilons]
-    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key != 'params_to_estimate'}]  # parameters for the epsilon distribution
+    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if type(value) != callable}]  # parameters for the epsilon distribution
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
 
     while gammas[n-1] < 1.0:
-        verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .3f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]: .4f}")
+        verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .5f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]}")
 
         # Construct trajectories
         xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
         verboseprint("\tTrajectories constructed.")
 
         # Check if there is any inf due to overflow error
-        if not (np.all(np.isfinite(xnk)) and np.all(np.isfinite(vnk))):
-            overflow_mask = np.any(~np.isfinite(xnk), axis=2) | np.any(~np.isfinite(vnk), axis=2)  # (N, T+1)
+        if not (np.all(np.isfinite(xnk)) and np.all(np.isfinite(vnk)) and
+                np.all(np.isfinite(nlps)) and np.all(np.isfinite(nlls))):
+            overflow_mask = np.any(~np.isfinite(xnk), axis=2) | np.any(~np.isfinite(vnk), axis=2) | ~np.isfinite(nlps) | ~np.isfinite(nlls) # (N, T+1)
             verboseprint(f"\tOverflow Detected. Trajectories affected: {overflow_mask.any(axis=1).sum()}")
+            # When there is overflow do something
+            if act_on_overflow:
+                dict_update = epsilon_params['on_overflow'](epsilon_params)
+                for key, value in dict_update.items():
+                    verboseprint(f"\tOn Overflow changed Epsilon {key} to {value}.")
+                epsilon_params.update(dict_update)
         else:
             overflow_mask = np.zeros((N, T+1), dtype=bool)
 
@@ -120,17 +135,19 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         verboseprint(f"\tLogLt {logLt}")
 
         # Step size adaptation
-        xnk[overflow_mask] = 0.0
-        epsilon_params.update(estimate_with_cond_variance(
-            xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate']
-        ))
+        if adapt_step_size:
+            xnk[overflow_mask] = 0.0
+            epsilon_params.update(estimate_with_cond_variance(
+                xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate'],
+                skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1)
+            ))
         # step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
         epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
         verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
 
         # Storage
         epsilon_history.append(epsilons)
-        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key != 'params_to_estimate'})
+        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if type(value) != callable})
         ess_history.append(ess)
 
         n += 1

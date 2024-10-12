@@ -28,7 +28,7 @@ def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likeliho
 
         # Full momentum step
         nlps[:, k+1], gnlps, nlls[:, k+1], gnlls = compute_likelihoods_priors_gradients(x)
-        v = v - epsilons*(gnlps + gamma_curr*gnlls)
+        v = v - epsilons*(gnlps + gamma_curr*gnlls)  # TODO: when gamma=0 and gnlls contain inf then 0*inf=nan
 
         # Store positions and velocities
         vnk[:, k+1] = v

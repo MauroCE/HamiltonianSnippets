@@ -1,7 +1,11 @@
+"""
+We use a uniform discrete distribution.
+"""
 import numpy as np
 from HamiltonianSnippets.sampler import hamiltonian_snippet
 from HamiltonianSnippets.utils import eps_to_str
 import pickle
+import os
 
 
 def generate_nlp_gnlp_nll_and_gnll_function(_y, _Z, _scales):
@@ -30,7 +34,7 @@ def generate_sample_prior_function(_scales):
 
 if __name__ == "__main__":
     # Grab data
-    data = np.load("logistic_regression/sonar.npy")
+    data = np.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sonar.npy"))
     y = -data[:, 0]  # Shape (208,)
     Z = data[:, 1:]  # Shape (208, 61)
     scales = np.array([5] * 61)
@@ -57,11 +61,9 @@ if __name__ == "__main__":
         print(f"Run: {i}")
         for eps_ix, eps in enumerate(step_sizes):
             epsilon_params = {
-                'distribution': 'inv_gauss',
-                'skewness': skewness,
-                'mean': eps,
-                'params_to_estimate': {'mean': lambda epsilon: epsilon},
-                'to_print': 'mean'
+                'distribution': 'discrete_uniform',
+                'values': [eps],
+                'to_print': 'values'
             }
             res = {'N': N, 'T': T, 'epsilon_params': epsilon_params}
             out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
@@ -69,12 +71,13 @@ if __name__ == "__main__":
                                       epsilon_params=epsilon_params,
                                       act_on_overflow=False,
                                       compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+                                      adapt_step_size=False,
                                       adapt_mass=mass_matrix_adaptation,
                                       verbose=verbose, seed=seeds[i])
             res.update({'logLt': out['logLt'], 'out': out})
             print(f"\t\tEps: {eps: .7f} \tLogLt: {out['logLt']: .1f} \tFinal ESS: {out['ess'][-1]: .1f}"
                   f"\tEps {epsilon_params['to_print'].capitalize()}: "
-                  f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
+                  f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]} Seed {int(seeds[i])} ")
             results.append(res)
 
     # Save results

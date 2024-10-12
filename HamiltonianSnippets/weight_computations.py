@@ -43,11 +43,18 @@ def compute_weights(
     assert len(nlls.shape) == 2, "Negative log likelihoods must be a 2-dimensional array."
     N, Tplus1, d = vnk.shape
 
-    ofm = overflow_mask.ravel()  # (N*(T+1), ) boolean mask, True if corresponding xnk or vnk is inf due to overflow
-    ofm_seed = overflow_mask[:, 0].ravel()  # (N, ) same mask but only for seed particles
+    # ofm = overflow_mask.ravel()  # (N*(T+1), ) boolean mask, True if corresponding xnk or vnk is inf due to overflow
+    # ofm_seed = overflow_mask[:, 0].ravel()  # (N, ) same mask but only for seed particles
 
-    log_num = np.repeat(-np.inf, N*Tplus1)  # np.ones(N*Tplus1)
-    log_den = np.zeros(N)
+    # First part is True when corresponding xnk or vnk is inf due to overflow
+    # Second part is True when squaring vnk leads to overflow
+    max_invmass = inv_mass_diag_next.max()  # maximum of the inverse mass diagonal
+    ofm = overflow_mask.ravel() | np.any(np.abs(vnk.reshape(-1, d)) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N*(T+1), )
+    # same mask but only for seed particles
+    ofm_seed = overflow_mask[:, 0].ravel() | np.any(np.abs(vnk[:, 0]) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N, )
+
+    log_num = np.repeat(-np.inf, N*Tplus1)  # default to zero denominator
+    log_den = np.repeat(np.nan, N)  # no overflown particle can ever become a seed
 
     # Log numerator of the unfolded weights
     log_num[~ofm] = (-nlps.ravel()[~ofm]) + gamma_next*(-nlls.ravel()[~ofm])
@@ -64,7 +71,8 @@ def compute_weights(
     W_unfolded = np.exp(logw_unfolded - logsumexp(logw_unfolded))  # (N, T+1) normalized unfolded weights
 
     # Overflown should lead to zero weights
-    assert W_unfolded[overflow_mask].sum() == 0, "Weights should be zero."
+    if W_unfolded[overflow_mask].sum() != 0:
+        raise ValueError(f"Weights should be zero but they are {W_unfolded[overflow_mask].sum()}")
 
     # Folded weights
     logw_folded = logsumexp(logw_unfolded, axis=1) - np.log(Tplus1)  # (N, ) un-normalized folded weights
