@@ -123,11 +123,6 @@ def create_log_cox_parameters(N):
 
 def grad_neg_log_likelihood(x, parameters):
     """Computes the gradient of the negative log likelihood."""
-    # gnlls = np.full(fill_value=np.inf, shape=np.prod(x.shape))
-    # ok = x.ravel() < np.log(np.finfo(np.float64).max)
-    # gnlls[ok] = np.exp(x.ravel()[ok] - 2*np.log(parameters['N']))
-    # return gnlls.reshape(x.shape) - parameters['Y']  # (N, d)
-
     # New version. It might be that for those "not okay" it is enough to set the gnlls to zero
     # Recall GNLLs are used only for the leapfrog step. If for i\in[1,N] some dimension has overflown
     # then that means that that dimension will overflow for the entire trajectory. I should keep it "overflown"
@@ -136,7 +131,6 @@ def grad_neg_log_likelihood(x, parameters):
     ok = np.all(x < np.log(np.finfo(np.float64).max), axis=1)  # (N, ) these have all dimensions that won't overflow
     gnlls[ok] = - parameters['Y'] + np.exp(x[ok] - 2*np.log(parameters['N']))
     return gnlls
-    # return - parameters['Y'] + np.exp(x - 2*np.log(parameters['N']))  # (1./parameters['dim'])*np.exp(x)  # (N, d)
 
 
 def neg_log_likelihood(x, parameters):
@@ -153,8 +147,6 @@ def neg_log_likelihood(x, parameters):
     # zero likelihood, or infinite nlls
     nlls[ok] = - np.sum(x[ok] * parameters['Y'] - np.exp(x[ok] - 2*np.log(parameters['N'])), axis=1)
     return nlls
-    # with np.errstate(over='ignore'):
-    #     return - np.sum(x * parameters['Y'].ravel() - np.exp(x - 2*np.log(parameters['N'])), axis=1)
 
 
 def neg_log_prior(x, parameters):
@@ -162,13 +154,11 @@ def neg_log_prior(x, parameters):
     Inv covar is (d, d) and mu_mean is (d, 1)."""
     meaned_x = x - parameters['mu_mean']  # (N, d)
     return 0.5*np.einsum('ij,ij->i', meaned_x, np.linalg.solve(parameters['covar'], meaned_x.T).T) - parameters['lognormconst_prior']
-    # return - sp.stats.multivariate_normal.logpdf(x, mean=parameters['mu_mean'], cov=parameters['covar'])
 
 
 def grad_neg_log_prior(x, parameters):
     """Computes the gradient of the negative log prior."""
     return np.linalg.solve(parameters['covar'], (x - parameters['mu_mean']).T).T
-    # return parameters['inv_covar'].dot(x.transpose() - parameters['mu_mean']).transpose()  # (N, d)
 
 
 def nlp_gnlp_nll_and_gnll(x, parameters):
@@ -190,7 +180,7 @@ if __name__ == "__main__":
     sample_prior = generate_sample_prior_function(dim=grid_dim, mu=params['mu'], l_covar=params['l_covar'])
 
     n_runs = 20
-    overall_seed = 1234  # np.random.randint(low=0, high=10000000000)
+    overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
     step_sizes = np.array(np.geomspace(start=0.001, stop=10.0, num=9, endpoint=True))  # np.array() used only for pylint
 
@@ -198,6 +188,8 @@ if __name__ == "__main__":
     N = 500
     T = 20
     skewness = 3
+    aoo = False  # whether to act on overflow
+    skipo = False  # skip overflown trajectories in epsilon computation
 
     results = []
     for i in range(n_runs):
@@ -212,24 +204,19 @@ if __name__ == "__main__":
                 'on_overflow': lambda param_dict: {'skewness': max(1, param_dict['skewness'] * 0.99)}
             }
             res = {'N': N, 'T': T, 'epsilon': epsilon_params['mean']}
-            # try:
             out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
                                       sample_prior=sample_prior,
                                       epsilon_params=epsilon_params,
-                                      act_on_overflow=False,
+                                      act_on_overflow=aoo,
                                       compute_likelihoods_priors_gradients=lambda x: nlp_gnlp_nll_and_gnll(x, params),
-                                      skip_overflown=False,
+                                      skip_overflown=skipo,
                                       adapt_mass=False, adapt_step_size=True,
                                       verbose=False, seed=seeds[i])
             print(f"\t\tEps: {eps: .7f} \tLogLt: {out['logLt']: .1f} \tFinal ESS: {out['ess'][-1]: .1f}"
                   f"\tEps {epsilon_params['to_print'].capitalize()}: "
                   f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
-            # except (ValueError, OverflowError):
-            #     out = {"logLt": np.nan, "gammas": [], "runtime": np.nan, "epsilons": [], "ess": [], 'epsilon_params_history': []}
-            #     print("\t\tFailed.")
             res.update({'logLt': out['logLt'], 'out': out})
             results.append(res)
 
-    # with open(f"results/cox{grid_dim}_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
-    #     pickle.dump(results, file)
-
+    with open(f"results/cox{grid_dim}_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}.pkl", "wb") as file:
+        pickle.dump(results, file)
