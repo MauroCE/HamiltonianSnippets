@@ -45,9 +45,9 @@ if __name__ == "__main__":
     n_runs = 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = [0.001]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
+    step_sizes = [0.17]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
     N = 1000
-    T = 30
+    T = 50
     skewness = 1  # a large skewness helps avoiding a large bias
     mass_matrix_adaptation = False
     mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
@@ -64,7 +64,8 @@ if __name__ == "__main__":
                 'skewness': skewness,
                 'mean': eps,
                 'params_to_estimate': {'mean': lambda epsilon: epsilon},
-                'to_print': 'mean'
+                'to_print': 'mean',
+                'param_for_T_adaptation': 'mean'
             }
             res = {'N': N, 'T': T, 'epsilon_params': epsilon_params}
             out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,

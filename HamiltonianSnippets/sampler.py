@@ -8,7 +8,7 @@ from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .utils import next_annealing_param
-from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps
+from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps, adapt_with_mean_eps
 
 
 def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
@@ -76,6 +76,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
+    T_history = [T]
 
     while gammas[n-1] < 1.0:
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .5f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]}")
@@ -138,10 +139,16 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         verboseprint(f"\tLogLt {logLt}")
 
         if adapt_n_leapfrog_steps:
-            out = adapt_num_leapfrog_steps(xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-                                     inv_mass_diag=1/mass_diag_curr,
-                                     compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
-                                     rng=rng)
+            # out = adapt_num_leapfrog_steps(xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
+            #                          inv_mass_diag=1/mass_diag_curr,
+            #                          compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+            #                          rng=rng)
+            T = adapt_with_mean_eps(xnk=xnk, vnk=vnk, eps_params=epsilon_params, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
+                                    inv_mass_diag=1/mass_diag_curr,
+                                    compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+                                    overflow_mask=overflow_mask,
+                                    rng=rng)
+            T_history.append(T)
 
         # Step size adaptation
         if adapt_step_size:
@@ -162,4 +169,4 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         n += 1
     runtime = time.time() - start_time
     return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilon_history, "ess": ess_history,
-            'epsilon_params_history': epsilon_params_history}
+            'epsilon_params_history': epsilon_params_history, 'T_history': T_history}
