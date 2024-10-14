@@ -51,7 +51,3 @@ def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likeliho
     vnk[:, -1] = v
 
     return xnk, vnk, nlps, nlls
-
-
-def momentum_update_when_gamma_is_zero(epsilons, gnlps, gnlls):
-    """Computes the momentum update safely when gamma is zero."""

@@ -8,13 +8,14 @@ from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .utils import next_annealing_param
+from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps
 
 
 def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
                         compute_likelihoods_priors_gradients: callable, epsilon_params: dict,
                         act_on_overflow: bool = False, adapt_step_size: bool = False,
-                        skip_overflown: bool = False, adapt_mass: bool = False, verbose: bool = True,
-                        seed: Optional[int] = None):
+                        adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False, adapt_mass: bool = False,
+                        verbose: bool = True, seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
     Parameters
@@ -40,6 +41,8 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :type act_on_overflow: bool
     :param adapt_step_size: Whether to adapt the leapfrog step size
     :type adapt_step_size: bool
+    :param adapt_n_leapfrog_steps: Whether to adapt the number of leapfrog steps
+    :type adapt_n_leapfrog_steps: bool
     :param skip_overflown: Whether to skip overflown trajectories when estimating epsilon
     :type skip_overflown: bool
     :param adapt_mass: Whether to adapt the mass matrix diagonal or not
@@ -101,7 +104,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
 
         # Estimate new mass matrix diagonal using importance sampling
         if adapt_mass:
-            W_mass_est, _, _, _ = compute_weights(
+            W_mass_est, _, _, _, _ = compute_weights(
                 vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1],
                 overflow_mask=overflow_mask
             )
@@ -133,6 +136,12 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         # Compute log-normalizing constant estimates
         logLt += logsumexp(logw_folded) - np.log(N)
         verboseprint(f"\tLogLt {logLt}")
+
+        if adapt_n_leapfrog_steps:
+            out = adapt_num_leapfrog_steps(xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
+                                     inv_mass_diag=1/mass_diag_curr,
+                                     compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+                                     rng=rng)
 
         # Step size adaptation
         if adapt_step_size:
