@@ -154,7 +154,7 @@ def compute_weights(
         gamma_next: float,
         gamma_curr: float,
         overflow_mask: NDArray,
-        ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
+        ) -> Tuple[NDArray, NDArray, NDArray, NDArray, NDArray]:
     """Computes unfolded and folded weights.
 
     Parameters
@@ -195,12 +195,17 @@ def compute_weights(
     ofm_seed = overflow_mask[:, 0].ravel() | np.any(np.abs(vnk[:, 0]) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N, )
 
     log_num = np.repeat(-np.inf, N*Tplus1)  # default to zero denominator
+    log_num_unfolded = np.repeat(-np.inf, N*Tplus1)
+    log_num_criterion = np.repeat(-np.inf, N*Tplus1)
     log_den = np.repeat(np.nan, N)  # no overflown particle can ever become a seed
 
     # Log numerator of the unfolded weights
-    log_num[~ofm] = (-nlps.ravel()[~ofm]) + gamma_next*(-nlls.ravel()[~ofm])
+    log_num[~ofm] = (-nlps.ravel()[~ofm])  # + gamma_next*(-nlls.ravel()[~ofm])
     log_num[~ofm] -= 0.5*np.sum(inv_mass_diag_next * vnk.reshape(-1, d)[~ofm]**2, axis=1)
     log_num[~ofm] += 0.5*np.sum(np.log(inv_mass_diag_next))
+
+    log_num_unfolded[~ofm] = log_num[~ofm] + gamma_next*(-nlls.ravel()[~ofm])
+    log_num_criterion[~ofm] = log_num[~ofm] + gamma_curr*(-nlls.ravel()[~ofm])
 
     # Log Denominator of the unfolded weights
     log_den[~ofm_seed] = (-nlps[~ofm_seed, 0]) + gamma_curr*(-nlls[~ofm_seed, 0])
@@ -208,8 +213,11 @@ def compute_weights(
     log_den[~ofm_seed] += 0.5*np.sum(np.log(inv_mass_diag_curr))
 
     # Unfolded weights
-    logw_unfolded = log_num.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
+    logw_unfolded = log_num_unfolded.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
     W_unfolded = np.exp(logw_unfolded - logsumexp(logw_unfolded))  # (N, T+1) normalized unfolded weights
+
+    # Log weights for the criterion
+    logw_criterion = log_num_criterion.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1)
 
     # Overflown should lead to zero weights
     if W_unfolded[overflow_mask].sum() != 0:
@@ -219,7 +227,7 @@ def compute_weights(
     logw_folded = logsumexp(logw_unfolded, axis=1) - np.log(Tplus1)  # (N, ) un-normalized folded weights
     W_folded = np.exp(logw_folded - logsumexp(logw_folded))  # (N, ) normalized folded weights
 
-    return W_unfolded, logw_unfolded, W_folded, logw_folded
+    return W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion
 
 
 def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss: callable, skip_overflown: bool,
@@ -371,7 +379,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
 
         # Estimate new mass matrix diagonal using importance sampling
         if adapt_mass:
-            W_mass_est, _, _, _ = compute_weights(
+            W_mass_est, _, _, _, _ = compute_weights(
                 vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1],
                 overflow_mask=overflow_mask
             )
@@ -382,7 +390,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
             mass_diag_next = mass_diag_curr
 
         # Compute weights and ESS
-        W_unfolded, logw_unfolded, W_folded, logw_folded = compute_weights(
+        W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion = compute_weights(
             vnk, nlps, nlls, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1], overflow_mask=overflow_mask)
         ess = 1 / np.sum(W_folded**2)  # folded ESS
         verboseprint(f"\tWeights Computed. Folded ESS {ess: .3f}")
@@ -409,47 +417,50 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
             xnk[overflow_mask] = 0.0
             old_mean = epsilon_params['mean']
             old_lambda = 9*old_mean / epsilon_params['skewness']**2
-            estimate, lala, flag = estimate_with_cond_variance(xnk=xnk, logw=logw_unfolded, epsilons=epsilons,
+            estimate, lala, flag = estimate_with_cond_variance(xnk=xnk, logw=logw_criterion, epsilons=epsilons,
                                                                ss=lambda e: e, skip_overflown=False,
                                                                overflow_mask=overflow_mask)
             epsilon_params['mean'] = estimate
             new_lambda = 9*estimate / epsilon_params['skewness']**2
             try:
-                upsilons = logsumexp(lala.reshape(-1, T+1), axis=1)
+                upsilons = logsumexp(lala.reshape(-1, T+1), axis=1) - np.log(T+1)  # (N, ...)
+                # upsilons = np.exp(upsilons)
+                # upsilons = upsilons / upsilons.sum()
                 # we just do this to have a better figure (maybe)
-                epsilons_fake = np.linspace(epsilons.min(), 5*epsilons.max(), N)
-                xnk_fake, vnk_fake, nlps_fake, nlls_fake = leapfrog(xnk[:, 0], vnk[:, 0], T, epsilons_fake, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
-                overflow_mask_fake = np.any(~np.isfinite(xnk_fake), axis=2) | np.any(~np.isfinite(vnk_fake), axis=2) | ~np.isfinite(nlps_fake) | ~np.isfinite(nlls_fake)
-                _, logw_unfolded_fake, _, _ = compute_weights(vnk_fake, nlps_fake, nlls_fake, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1], overflow_mask=overflow_mask_fake)
-                _, lala_fake, _ = estimate_with_cond_variance(xnk=xnk_fake, logw=logw_unfolded_fake,
-                                                                       epsilons=epsilons_fake, ss=lambda e: e,
-                                                                       skip_overflown=False, overflow_mask=overflow_mask_fake)
-                upsilons_fake = logsumexp(lala_fake.reshape(-1, T+1), axis=1)
-                shifted_upsilons_fake = upsilons_fake - upsilons_fake.min()
+                # epsilons_fake = np.linspace(epsilons.min(), 5*epsilons.max(), N)
+                # xnk_fake, vnk_fake, nlps_fake, nlls_fake = leapfrog(xnk[:, 0], vnk[:, 0], T, epsilons_fake, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
+                # overflow_mask_fake = np.any(~np.isfinite(xnk_fake), axis=2) | np.any(~np.isfinite(vnk_fake), axis=2) | ~np.isfinite(nlps_fake) | ~np.isfinite(nlls_fake)
+                # _, logw_unfolded_fake, _, _ = compute_weights(vnk_fake, nlps_fake, nlls_fake, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1], overflow_mask=overflow_mask_fake)
+                # _, lala_fake, _ = estimate_with_cond_variance(xnk=xnk_fake, logw=logw_unfolded_fake,
+                #                                                        epsilons=epsilons_fake, ss=lambda e: e,
+                #                                                        skip_overflown=False, overflow_mask=overflow_mask_fake)
+                # upsilons_fake = logsumexp(lala_fake.reshape(-1, T+1), axis=1) - np.log(T+1)
+                # upsilons_fake = upsilons_fake / upsilons_fake.sum()
+                # shifted_upsilons_fake = upsilons_fake - upsilons_fake.min()
                 # import matplotlib.pyplot as plt
                 # sample the new ones
-                new_epsilons = sample_epsilons(epsilon_params, N=N, rng=rng)
+                # new_epsilons = sample_epsilons(epsilon_params, N=N, rng=rng)
                 # import seaborn as sns
-                shifted_upsilons = upsilons #- upsilons.min()
+                # shifted_upsilons = upsilons #- upsilons.min()
                 fig, ax = plt.subplots(figsize=(4, 4), sharex=True, sharey=True)
                 # ax.scatter(epsilons, upsilon, alpha=0.5)
                 counts, bins, bars = ax.hist(epsilons, bins=50, density=True, color='lightcoral', ec='brown', zorder=10, label=r'$\mathregular{\nu_{n-1}}$')
                 _ = [b.remove() for b in bars]
                 # sns.kdeplot(epsilons, color='lightcoral', ax=ax[0], label=r'$\mathregular{\nu_{n-1}}$')
                 # sns.kdeplot(new_epsilons, color='lightseagreen', ax=ax[0], label=r'$\mathregular{\nu_{n}}$')
-                xaxis_vals = np.linspace(min(epsilons.min(), new_epsilons.min()), 1.1*max(epsilons.max(), new_epsilons.max()), 1000)
+                xaxis_vals = np.linspace(epsilons.min(), 1.1*epsilons.max(), 1000)
                 # ax[0].plot(xaxis_vals, invgauss(mu=old_mean/old_lambda, loc=0, scale=old_lambda).pdf(xaxis_vals), color='lightcoral')
                 # ax[0].plot(xaxis_vals, invgauss(mu=estimate/new_lambda, loc=0, scale=new_lambda).pdf(xaxis_vals), color='lightseagreen')
                 #ax[1].hist2d(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (counts.max()), bins=30, zorder=0, label='upsilon')
                 # ax[1].hist2d(epsilons_fake, (shidted_upsilons_fake / shidted_upsilons_fake.max()) * counts.max(), bins=30, cmap='Blues', zorder=0)
-                hist2d = ax.hist2d(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (1.5*counts.max()), bins=30, zorder=0, cmap='Blues')
+                hist2d = ax.hist2d(epsilons, upsilons, bins=30, zorder=0, cmap='Blues')
                 # ax[1].scatter(epsilons_fake, (shidted_upsilons_fake / shidted_upsilons_fake.max()) * counts.max(), alpha=0.5, zorder=0, color='gold', ec='goldenrod')
                 # ax[1].scatter(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (counts.max()), alpha=0.5, zorder=1, color='thistle', ec='violet')
                 ax2 = ax.twinx()
-                old_dens = ax2.plot(xaxis_vals, invgauss(mu=old_mean/old_lambda, loc=0, scale=old_lambda).pdf(xaxis_vals), color='gold', zorder=1, lw=2, label=r'$\mathregular{\nu_{n-1}}$')
-                new_dens = ax2.plot(xaxis_vals, invgauss(mu=estimate/new_lambda, loc=0, scale=new_lambda).pdf(xaxis_vals), color='indianred', zorder=2, lw=2, label=r'$\mathregular{\nu_{n}}$')
+                ax2.plot(xaxis_vals, invgauss(mu=old_mean/old_lambda, loc=0, scale=old_lambda).pdf(xaxis_vals), color='gold', zorder=1, lw=2, label=r'$\mathregular{\nu_{n-1}}$')
+                ax2.plot(xaxis_vals, invgauss(mu=estimate/new_lambda, loc=0, scale=new_lambda).pdf(xaxis_vals), color='indianred', zorder=2, lw=2, label=r'$\mathregular{\nu_{n}}$')
                 ax.set_xlabel(r"$\mathregular{\epsilon}$", fontsize=13)
-                ax.set_ylabel(r'$\mathregular{\upsilon_n(\epsilon, z)}$', fontsize=13) #"Criterion")
+                ax.set_ylabel(r'$\mathregular{log\,\upsilon_n(\epsilon, z)}$', fontsize=13) #"Criterion")
                 ax2.set_ylabel("Density", fontsize=13)
                 proxy_hist2d = mpatches.Patch(color='cornflowerblue', label=r'$\mathregular{\upsilon_n(\epsilon, z)}$')
                 handles, labels = ax2.get_legend_handles_labels()
@@ -499,7 +510,7 @@ if __name__ == "__main__":
     step_sizes = [0.001] #np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
     N = 1000
     T = 30
-    skewness = 1  # a large skewness helps avoiding a large bias
+    skewness = 3  # a large skewness helps avoiding a large bias
     mass_matrix_adaptation = False
     mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
     verbose = False
@@ -533,7 +544,3 @@ if __name__ == "__main__":
                   f"\tEps {epsilon_params['to_print'].capitalize()}: "
                   f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
             results.append(res)
-    #
-    # # Save results
-    # # with open(f"logistic_regression/results/seed{overall_seed}_N{N}_T{T}_mass{mass_matrix_adaptation}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
-    # #     pickle.dump(results, file)

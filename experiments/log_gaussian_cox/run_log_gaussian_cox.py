@@ -218,5 +218,5 @@ if __name__ == "__main__":
             res.update({'logLt': out['logLt'], 'out': out})
             results.append(res)
 
-    with open(f"results/cox{grid_dim}_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}.pkl", "wb") as file:
-        pickle.dump(results, file)
+    # with open(f"results/cox{grid_dim}_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}.pkl", "wb") as file:
+    #     pickle.dump(results, file)

@@ -112,7 +112,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
             mass_diag_next = mass_diag_curr
 
         # Compute weights and ESS
-        W_unfolded, logw_unfolded, W_folded, logw_folded = compute_weights(
+        W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion = compute_weights(
             vnk, nlps, nlls, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1], overflow_mask=overflow_mask)
         ess = 1 / np.sum(W_folded**2)  # folded ESS
         verboseprint(f"\tWeights Computed. Folded ESS {ess: .3f}")
@@ -138,7 +138,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         if adapt_step_size:
             xnk[overflow_mask] = 0.0
             epsilon_params.update(estimate_with_cond_variance(
-                xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate'],
+                xnk=xnk, logw=logw_criterion, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate'],
                 skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1)
             ))
         # step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)

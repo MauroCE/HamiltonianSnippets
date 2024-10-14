@@ -13,7 +13,7 @@ def compute_weights(
         gamma_next: float,
         gamma_curr: float,
         overflow_mask: NDArray,
-        ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
+        ) -> Tuple[NDArray, NDArray, NDArray, NDArray, NDArray]:
     """Computes unfolded and folded weights.
 
     Parameters
@@ -35,8 +35,8 @@ def compute_weights(
     :param overflow_mask: Mask indicating where there has been an overflow either in xnk or vnk. There we do not
                           compute a weight, it will be set to zero. Will have shape (N, T+1).
     :type overflow_mask: numpy.ndarray
-    :return: Tuple containing `(W_unfolded, logw_unfolded, W_folded, logw_unfolded)`
-    :rtype: tuple(numpy.array, numpy.array, numpy.array, numpy.array)
+    :return: Tuple containing `(W_unfolded, logw_unfolded, W_folded, logw_unfolded, logw_criterion)`
+    :rtype: tuple(numpy.array, numpy.array, numpy.array, numpy.array, numpy.array)
     """
     assert len(vnk.shape) == 3, "Velocities must be a 3-dimensional array."
     assert len(nlps.shape) == 2, "Negative log priors must be a 2-dimensional array."
@@ -54,12 +54,17 @@ def compute_weights(
     ofm_seed = overflow_mask[:, 0].ravel() | np.any(np.abs(vnk[:, 0]) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N, )
 
     log_num = np.repeat(-np.inf, N*Tplus1)  # default to zero denominator
+    log_num_unfolded = np.repeat(-np.inf, N*Tplus1)
+    log_num_criterion = np.repeat(-np.inf, N*Tplus1)
     log_den = np.repeat(np.nan, N)  # no overflown particle can ever become a seed
 
     # Log numerator of the unfolded weights
-    log_num[~ofm] = (-nlps.ravel()[~ofm]) + gamma_next*(-nlls.ravel()[~ofm])
+    log_num[~ofm] = (-nlps.ravel()[~ofm])  # + gamma_next*(-nlls.ravel()[~ofm])
     log_num[~ofm] -= 0.5*np.sum(inv_mass_diag_next * vnk.reshape(-1, d)[~ofm]**2, axis=1)
     log_num[~ofm] += 0.5*np.sum(np.log(inv_mass_diag_next))
+
+    log_num_unfolded[~ofm] = log_num[~ofm] + gamma_next*(-nlls.ravel()[~ofm])
+    log_num_criterion[~ofm] = log_num[~ofm] + gamma_curr*(-nlls.ravel()[~ofm])
 
     # Log Denominator of the unfolded weights
     log_den[~ofm_seed] = (-nlps[~ofm_seed, 0]) + gamma_curr*(-nlls[~ofm_seed, 0])
@@ -67,8 +72,11 @@ def compute_weights(
     log_den[~ofm_seed] += 0.5*np.sum(np.log(inv_mass_diag_curr))
 
     # Unfolded weights
-    logw_unfolded = log_num.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
+    logw_unfolded = log_num_unfolded.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
     W_unfolded = np.exp(logw_unfolded - logsumexp(logw_unfolded))  # (N, T+1) normalized unfolded weights
+
+    # Weights for criterion
+    logw_criterion = log_num_criterion.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) similar to unfolded
 
     # Overflown should lead to zero weights
     if W_unfolded[overflow_mask].sum() != 0:
@@ -78,4 +86,4 @@ def compute_weights(
     logw_folded = logsumexp(logw_unfolded, axis=1) - np.log(Tplus1)  # (N, ) un-normalized folded weights
     W_folded = np.exp(logw_folded - logsumexp(logw_folded))  # (N, ) normalized folded weights
 
-    return W_unfolded, logw_unfolded, W_folded, logw_folded
+    return W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion
