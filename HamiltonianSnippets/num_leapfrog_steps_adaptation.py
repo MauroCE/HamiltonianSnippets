@@ -33,11 +33,11 @@ def adapt_num_leapfrog_steps(xnk: NDArray, vnk: NDArray, epsilons: NDArray, nlps
 
     # Compute integration times
     taus = np.arange(Tplus1).reshape(1, -1) * eps_coupled[coupling[:, 0]].reshape(-1, 1)  # (N//2, T+1)
-    binned_avg_tau, tau_bins = binned_average(sq_norms=sq_norms, taus=taus, n_bins=Tplus1)
+    binned_avg_sq_norms, tau_bins = binned_average(sq_norms=sq_norms, taus=taus, n_bins=Tplus1)
 
     fig, ax = plt.subplots()
     ax.plot(taus.T, sq_norms.T, color='lightcoral', alpha=0.5)
-    ax.plot(tau_bins, binned_avg_tau, lw=3, color='black')
+    ax.plot(tau_bins, binned_avg_sq_norms, lw=3, color='black')
     plt.show()
 
     # For each trajectory find k where square norm is smallest and multiply by step size to find taus
@@ -46,13 +46,26 @@ def adapt_num_leapfrog_steps(xnk: NDArray, vnk: NDArray, epsilons: NDArray, nlps
     pass
 
 
-def binned_average(sq_norms, taus, n_bins):
-    """Computes a binned average."""
-    bins = np.linspace(start=taus.min(), stop=taus.max(), num=n_bins)
-    bin_indices = np.digitize(taus, bins, right=True)  # since taus will include zeros
-    y_binned_means = np.zeros(n_bins)
+def binned_average(sq_norms, taus, n_bins) -> Tuple[NDArray, NDArray]:
+    """Computes a binned average of the squared norms over the taus.
+
+    Parameters
+    ----------
+    :param sq_norms: Squared norms of the coupled particles, should have shape (n, T+1) where n <= N
+    :type sq_norms: np.ndarray
+    :param taus: Integration times for the coupled particles, should have shape (n, T+1) where n <= N
+    :type taus: np.ndarray
+    :param n_bins: Number of bins to divide the integration time into
+    :type n_bins: int
+    :return: tuple of binned mean of squared norms and tau bins used
+    :rtype: tuple
+    """
+    # Divide the integration time into bins
+    tau_bins = np.linspace(start=taus.min(), stop=taus.max(), num=n_bins)
+    bin_indices = np.digitize(taus, tau_bins, right=True)  # since taus will include zeros
+    sq_norm_binned_means = np.zeros(n_bins)
     for i in range(n_bins):
         mask = (bin_indices == i)
         if np.sum(mask) > 0:
-            y_binned_means[i] = np.mean(sq_norms[mask])
-    return y_binned_means, bins
+            sq_norm_binned_means[i] = np.mean(sq_norms[mask])
+    return sq_norm_binned_means, tau_bins
