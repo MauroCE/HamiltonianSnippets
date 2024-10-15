@@ -3,19 +3,19 @@ import numpy as np
 from typing import Optional
 from numpy.typing import NDArray
 from scipy.special import logsumexp
-from copy import deepcopy
 
 from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .utils import next_annealing_param
-from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps, adapt_with_mean_eps, adapt_num_leapfrog_steps_contractivity
+from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps_contractivity
 
 
 def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
                         compute_likelihoods_priors_gradients: callable, epsilon_params: dict,
                         act_on_overflow: bool = False, adapt_step_size: bool = False,
                         adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False, adapt_mass: bool = False,
+                        plot_contractivity: bool = False,
                         verbose: bool = True, seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
@@ -48,6 +48,8 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :type skip_overflown: bool
     :param adapt_mass: Whether to adapt the mass matrix diagonal or not
     :type adapt_mass: bool
+    :param plot_contractivity: Whether to plot the contractivity at each step
+    :type plot_contractivity: bool
     :param verbose: Whether to print progress of the algorithm
     :type verbose: bool
     :param seed: Seed for the random number generator
@@ -78,6 +80,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     ess_history = [N]
     logLt = 0.0
     T_history = [T]
+    coupling_success_history = []
 
     while gammas[n-1] < 1.0:
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .5f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]}")
@@ -89,7 +92,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         # Check if there is any inf due to overflow error
         if not (np.all(np.isfinite(xnk)) and np.all(np.isfinite(vnk)) and
                 np.all(np.isfinite(nlps)) and np.all(np.isfinite(nlls))):
-            overflow_mask = np.any(~np.isfinite(xnk), axis=2) | np.any(~np.isfinite(vnk), axis=2) | ~np.isfinite(nlps) | ~np.isfinite(nlls) # (N, T+1)
+            overflow_mask = np.any(~np.isfinite(xnk), axis=2) | np.any(~np.isfinite(vnk), axis=2) | ~np.isfinite(nlps) | ~np.isfinite(nlls)  # (N, T+1)
             verboseprint(f"\tOverflow Detected. Trajectories affected: {overflow_mask.any(axis=1).sum()}")
             # When there is overflow do something
             if act_on_overflow:
@@ -139,16 +142,13 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         logLt += logsumexp(logw_folded) - np.log(N)
         verboseprint(f"\tLogLt {logLt}")
 
-        # out = adapt_num_leapfrog_steps(xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-        #                          inv_mass_diag=1/mass_diag_curr,
-        #                          compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
-        #                          rng=rng)
-        # T_new = adapt_with_mean_eps(xnk=xnk, vnk=vnk, eps_params=epsilon_params, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-        #                         inv_mass_diag=1/mass_diag_curr,
-        #                         compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
-        #                         overflow_mask=overflow_mask,
-        #                         rng=rng)
-        # T_new = adapt_num_leapfrog_steps_contractivity(vnk, vnk, epsilons, nlps, nlls, T, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients, rng)
+        # T adaptation
+        if adapt_n_leapfrog_steps:
+            T, coupling_found = adapt_num_leapfrog_steps_contractivity(
+                xnk, vnk, epsilons, nlps, nlls, T, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients,
+                plot_contractivity, rng)
+            coupling_success_history.append(coupling_found)
+        verboseprint(f"\tT adapted to {T}")
 
         # Step size adaptation
         if adapt_step_size:
@@ -157,23 +157,17 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                 xnk=xnk, logw=logw_criterion, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate'],
                 skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1)
             ))
-        # step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
-        new_epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
-        T_new = adapt_num_leapfrog_steps_contractivity(xnk, vnk, epsilons, nlps, nlls, T, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients, rng)
-        epsilons = new_epsilons
+        epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
         verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
-
-        if adapt_n_leapfrog_steps:
-            T = T_new
-            verboseprint(f"\tT: {T}")
-        T_history.append(T)
 
         # Storage
         epsilon_history.append(epsilons)
         epsilon_params_history.append({key: value for key, value in epsilon_params.items() if type(value) != callable})
         ess_history.append(ess)
+        T_history.append(T)
 
         n += 1
     runtime = time.time() - start_time
     return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilon_history, "ess": ess_history,
-            'epsilon_params_history': epsilon_params_history, 'T_history': T_history}
+            'epsilon_params_history': epsilon_params_history, 'T_history': T_history,
+            'coupling_success_history': coupling_success_history}

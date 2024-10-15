@@ -51,7 +51,7 @@ if __name__ == "__main__":
     skewness = 1  # a large skewness helps avoiding a large bias
     mass_matrix_adaptation = False
     mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
-    verbose = True
+    verbose = False
     step_size_adaptation = True
     T_adaptation = True
 
