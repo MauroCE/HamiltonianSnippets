@@ -15,7 +15,8 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                         compute_likelihoods_priors_gradients: callable, epsilon_params: dict,
                         act_on_overflow: bool = False, adapt_step_size: bool = False,
                         adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False, adapt_mass: bool = False,
-                        plot_contractivity: bool = False,
+                        plot_contractivity: bool = False, T_max: int = 100, T_min: int = 5,
+                        max_tries_find_coupling: int = 100,
                         verbose: bool = True, seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
@@ -50,6 +51,12 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :type adapt_mass: bool
     :param plot_contractivity: Whether to plot the contractivity at each step
     :type plot_contractivity: bool
+    :param T_max: Maximum budget for the number of integration steps
+    :type T_max: int
+    :param T_min: Minimum budget for the number of integration steps
+    :type T_min: int
+    :param max_tries_find_coupling: Number of maximum tries used to try to find a coupling
+    :type max_tries_find_coupling: int
     :param verbose: Whether to print progress of the algorithm
     :type verbose: bool
     :param seed: Seed for the random number generator
@@ -57,6 +64,8 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     """
     assert isinstance(N, int) and N >= 1, "Number of particles must be a positive integer."
     assert isinstance(T, int) and T >= 1, "Number of integration steps must be a positive integer."
+    assert T_max > T_min, "Maximum number of integration steps must be larger than minimum number."
+    assert max_tries_find_coupling > 1, "Maximum number of tries to find a coupling must be >= 1."
 
     # Set up time-keeping, random number generation, printing, iterations, mass_matrix and more
     start_time = time.time()
@@ -145,8 +154,10 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         # T adaptation
         if adapt_n_leapfrog_steps:
             T, coupling_found = adapt_num_leapfrog_steps_contractivity(
-                xnk, vnk, epsilons, nlps, nlls, T, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients,
-                plot_contractivity, rng)
+                xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
+                inv_mass_diag=1/mass_diag_curr, compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+                plot_contractivity=plot_contractivity, max_tries=max_tries_find_coupling, T_max=T_max, T_min=T_min,
+                rng=rng)
             coupling_success_history.append(coupling_found)
         verboseprint(f"\tT adapted to {T}")
 

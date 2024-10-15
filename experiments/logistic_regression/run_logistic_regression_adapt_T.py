@@ -45,7 +45,7 @@ if __name__ == "__main__":
     n_runs = 1
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = [0.001]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
+    step_sizes = np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
     N = 500
     T = 50
     skewness = 1  # a large skewness helps avoiding a large bias
@@ -54,6 +54,10 @@ if __name__ == "__main__":
     verbose = False
     step_size_adaptation = True
     T_adaptation = True
+    T_max = 500
+    T_min = 5
+    plot_contractivity = False
+    max_tries_coupling = 100
 
     results = []
     for i in range(n_runs):
@@ -67,12 +71,6 @@ if __name__ == "__main__":
                 'to_print': 'mean',
                 'param_for_T_adaptation': 'mean'
             }
-            # epsilon_params = {
-            #     'distribution': 'discrete_uniform',
-            #     'values': [0.17],
-            #     'to_print': 'values',
-            #     'param_for_T_adaptation': 'values'
-            # }
             res = {'N': N, 'T': T, 'epsilon_params': epsilon_params}
             out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
                                       sample_prior=sample_prior,
@@ -83,9 +81,11 @@ if __name__ == "__main__":
                                       adapt_mass=mass_matrix_adaptation,
                                       adapt_step_size=step_size_adaptation,
                                       adapt_n_leapfrog_steps=T_adaptation,
-                                      verbose=verbose, seed=seeds[i])
+                                      verbose=verbose, seed=seeds[i],
+                                      T_max=T_max, T_min=T_min, plot_contractivity=plot_contractivity,
+                                      max_tries_find_coupling=max_tries_coupling)
             res.update({'logLt': out['logLt'], 'out': out})
             print(f"\t\tEps: {eps: .7f} \tLogLt: {out['logLt']: .1f} \tFinal ESS: {out['ess'][-1]: .1f}"
-                  f"\tEps {epsilon_params['to_print'].capitalize()}: "
+                  f"\tEps: {epsilon_params['to_print'].capitalize()} Final T: {out['T_history'][-1]}"
                   f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
             results.append(res)
