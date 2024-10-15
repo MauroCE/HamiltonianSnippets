@@ -3,12 +3,13 @@ import numpy as np
 from typing import Optional
 from numpy.typing import NDArray
 from scipy.special import logsumexp
+from copy import deepcopy
 
 from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .utils import next_annealing_param
-from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps, adapt_with_mean_eps
+from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps, adapt_with_mean_eps, adapt_num_leapfrog_steps_contractivity
 
 
 def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
@@ -138,17 +139,16 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         logLt += logsumexp(logw_folded) - np.log(N)
         verboseprint(f"\tLogLt {logLt}")
 
-        if adapt_n_leapfrog_steps:
-            # out = adapt_num_leapfrog_steps(xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-            #                          inv_mass_diag=1/mass_diag_curr,
-            #                          compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
-            #                          rng=rng)
-            T = adapt_with_mean_eps(xnk=xnk, vnk=vnk, eps_params=epsilon_params, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-                                    inv_mass_diag=1/mass_diag_curr,
-                                    compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
-                                    overflow_mask=overflow_mask,
-                                    rng=rng)
-            T_history.append(T)
+        # out = adapt_num_leapfrog_steps(xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
+        #                          inv_mass_diag=1/mass_diag_curr,
+        #                          compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+        #                          rng=rng)
+        # T_new = adapt_with_mean_eps(xnk=xnk, vnk=vnk, eps_params=epsilon_params, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
+        #                         inv_mass_diag=1/mass_diag_curr,
+        #                         compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+        #                         overflow_mask=overflow_mask,
+        #                         rng=rng)
+        # T_new = adapt_num_leapfrog_steps_contractivity(vnk, vnk, epsilons, nlps, nlls, T, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients, rng)
 
         # Step size adaptation
         if adapt_step_size:
@@ -158,8 +158,15 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                 skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1)
             ))
         # step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
-        epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
+        new_epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
+        T_new = adapt_num_leapfrog_steps_contractivity(xnk, vnk, epsilons, nlps, nlls, T, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients, rng)
+        epsilons = new_epsilons
         verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
+
+        if adapt_n_leapfrog_steps:
+            T = T_new
+            verboseprint(f"\tT: {T}")
+        T_history.append(T)
 
         # Storage
         epsilon_history.append(epsilons)

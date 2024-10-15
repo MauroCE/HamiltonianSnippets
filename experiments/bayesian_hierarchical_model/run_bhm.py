@@ -5,53 +5,61 @@ import pickle
 import os
 
 
-def generate_nlp_gnlp_nll_and_gnll_function(_y, _Z, _scales):
-    """Computes negative log likelihood and its gradient manually.
-
-    nll(x) = sum_{i=1}^{n_d} log(1 + exp(-y_i x^top z_i))
-
-    gnll(x) = sum_{i=1}^{n_d} frac{exp(-y_i x^top z_i)}{1 + exp(-y_i x^top z_i)} y_i z_i
-    """
-    def nlp_gnlp_nll_and_gnll(x):
-        # Negative log prior
-        nlp = 0.5*61*np.log(2*np.pi) + 0.5*np.log(400.*(25.0**60)) + 0.5*np.sum((x / _scales)**2, axis=1)
-        gnlp = x / (_scales**2)
-        # Here I use D for the number of data points (n_d)
-        logE = (-_y[None, :] * x.dot(_Z.T)).T  # (N, n_d)
-        laeE = np.logaddexp(0.0, logE)  # (n_d, N)
-        gnll = - np.einsum('DN, D, Dp -> Np', np.exp(logE - laeE), _y, _Z)  # (N, 61)
-        return nlp, gnlp, np.sum(laeE, axis=0), gnll  # (N, ) and (N, 61)
-    return nlp_gnlp_nll_and_gnll
+def generate_data(data_dim: int, seed: int):
+    """Generates data for the Bayesian Hierarchical Model in https://arxiv.org/pdf/2407.20722."""
+    rng = np.random.default_rng(seed=seed)
+    # Sample `dim` latent variables
+    z = rng.normal(loc=0, scale=np.exp(-2.0), size=data_dim)  # (dim, )
+    # Sample `dim` observed data
+    return z + rng.normal(loc=0, scale=1.0, size=data_dim)  # (dim, )
 
 
-def generate_sample_prior_function(_scales):
-    """Samples n particles from the prior."""
-    return lambda n, rng: _scales * rng.normal(loc=0.0, scale=1.0, size=(n, 61))
+def nlp_gnlp_nll_and_gnll(x):
+    """Computes negative log prior, gradient negative log prior, negative log likelihood and gradient negative log-likelihood.
+    Assumes tau=2, theta=-2 and sigma=1. The input is `x = (theta, z)` and therefore we expect it to have shape (N, dim+1)."""
+
+    # Negative log prior
+    nlp = 0.125 * x[:, 0]**2   # (N, ) -log_p(theta) assuming tau=2
+    nlp += 0.5*np.einsum('ij,ij->i', x[:, 1:], x[:, 1:]) / np.exp(x[:, 0])  # (N, ) -log_p(z|theta)
+
+    # Gradient negative log prior
+    gnlp = np.full(fill_value=np.inf, shape=x.shape)
+    gnlp[:, 0] = 0.5*x[:, 0]  # (N, 1) - nabla_log_p(theta) assuming tau=2
+    gnlp[:, 1:] = x[:, 1:] / np.exp(x[:, 0])  # (N, dim) - nala_log_p(z|theta)
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
-    # Grab data
-    data = np.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sonar.npy"))
-    y = -data[:, 0]  # Shape (208,)
-    Z = data[:, 1:]  # Shape (208, 61)
-    scales = np.array([5] * 61)
-    scales[0] = 20
+    # Generate data
+    dim = 30
+    data_seed = 1234
+    data = generate_data(data_dim=dim, seed=data_seed)
+
+    # We consider (z, theta) to be our parameter, which will be `(dim+1)`-dimensional. This means that our prior
+    # corresponds to `p(z, theta)` and our likelihood to `p(D | z, theta) = p(D | z)`, i.e. it does not depend on theta.
+
+
 
     # Define function to sample the prior
-    sample_prior = generate_sample_prior_function(_scales=scales)
-    compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function(_y=y, _Z=Z, _scales=scales)
+    sample_prior = generate_sample_prior_function()
+    compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function()
 
     # Run Hamiltonian snippets
-    n_runs = 1
+    n_runs = 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = [0.001]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
-    N = 500
+    step_sizes = [0.17]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
+    N = 1000
     T = 50
     skewness = 1  # a large skewness helps avoiding a large bias
     mass_matrix_adaptation = False
-    mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
-    verbose = True
+    mass_diag = np.ones(61)
+    verbose = False
     step_size_adaptation = True
     T_adaptation = True
 
@@ -67,12 +75,6 @@ if __name__ == "__main__":
                 'to_print': 'mean',
                 'param_for_T_adaptation': 'mean'
             }
-            # epsilon_params = {
-            #     'distribution': 'discrete_uniform',
-            #     'values': [0.17],
-            #     'to_print': 'values',
-            #     'param_for_T_adaptation': 'values'
-            # }
             res = {'N': N, 'T': T, 'epsilon_params': epsilon_params}
             out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
                                       sample_prior=sample_prior,
