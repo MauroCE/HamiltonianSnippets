@@ -42,22 +42,22 @@ if __name__ == "__main__":
     compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function(_y=y, _Z=Z, _scales=scales)
 
     # Run Hamiltonian snippets
-    n_runs = 1
+    n_runs = 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
     step_sizes = np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
     N = 500
-    T = 50
-    skewness = 1  # a large skewness helps avoiding a large bias
+    T = 80
+    skewness = 3  # a large skewness helps avoiding a large bias
     mass_matrix_adaptation = False
     mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
     verbose = False
     step_size_adaptation = True
     T_adaptation = True
-    T_max = 500
+    T_max = T
     T_min = 5
     plot_contractivity = False
-    max_tries_coupling = 100
+    max_tries_coupling = 200
 
     results = []
     for i in range(n_runs):
@@ -71,7 +71,7 @@ if __name__ == "__main__":
                 'to_print': 'mean',
                 'param_for_T_adaptation': 'mean'
             }
-            res = {'N': N, 'T': T, 'epsilon_params': epsilon_params}
+            res = {'N': N, 'T': T, 'epsilon_params': {key: value for key, value in epsilon_params.items() if key != "params_to_estimate"}}
             out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
                                       sample_prior=sample_prior,
                                       epsilon_params=epsilon_params,
@@ -89,3 +89,6 @@ if __name__ == "__main__":
                   f"\tEps: {epsilon_params['to_print'].capitalize()} Final T: {out['T_history'][-1]}"
                   f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
             results.append(res)
+
+    with open(f"results/adaptT_Tmax{T_max}_T{T}_seed{overall_seed}_N{N}_T{T}_mass{mass_matrix_adaptation}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
+        pickle.dump(results, file)

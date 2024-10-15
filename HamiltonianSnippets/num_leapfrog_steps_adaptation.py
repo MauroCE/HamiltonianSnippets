@@ -94,8 +94,8 @@ def adapt_num_leapfrog_steps_contractivity(
         taus = np.arange(Tplus1).reshape(1, -1) * eps_coupled[coupling[:, 0]].reshape(-1, 1)  # (N//2, T+1)
 
         # Compute a binned average of the contractivity as a function of tau
-        avg_contraction, tau_bins = binned_average(contractivity, taus, Tplus1)
-        tau_min_contraction = tau_bins[np.argmin(avg_contraction)]  # tau corresponding to the minimum average contraction
+        avg_contraction, tau_bins = binned_average(contractivity, taus, Tplus1)  # min used to avoid wasting computation, the curve should be fine enough
+        tau_min_contraction = tau_bins[np.nanargmin(avg_contraction)]  # tau corresponding to the minimum average contraction
         median_eps_bottom = np.quantile(eps_coupled[coupling[:, 0]][bottom_i], q=0.5)  # median epsilon corresponding to tail of contraction distribution
         bottom_taus_median = np.quantile(bottom_taus, q=0.5)  # median of taus corresponding to tail of contraction distribution
 
@@ -147,7 +147,7 @@ def binned_average(y_values, x_values, n_bins) -> Tuple[NDArray, NDArray]:
     # Divide the integration time into bins
     x_bins = np.linspace(start=x_values.min(), stop=x_values.max(), num=n_bins)
     bin_indices = np.digitize(x_values, x_bins, right=True)  # since taus will include zeros
-    binned_means = np.zeros(n_bins)
+    binned_means = np.full(fill_value=np.nan, shape=n_bins)
     for i in range(n_bins):
         mask = (bin_indices == i)
         if np.sum(mask) > 0:

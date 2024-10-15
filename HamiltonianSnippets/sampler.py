@@ -3,6 +3,7 @@ import numpy as np
 from typing import Optional
 from numpy.typing import NDArray
 from scipy.special import logsumexp
+from copy import deepcopy
 
 from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
@@ -84,7 +85,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
 
     # Storage
     epsilon_history = [epsilons]
-    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if type(value) != callable}]  # parameters for the epsilon distribution
+    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key != "params_to_estimate"}]  # parameters for the epsilon distribution
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
@@ -151,6 +152,16 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         logLt += logsumexp(logw_folded) - np.log(N)
         verboseprint(f"\tLogLt {logLt}")
 
+        # Step size adaptation
+        if adapt_step_size:
+            xnk[overflow_mask] = 0.0
+            epsilon_params.update(estimate_with_cond_variance(
+                xnk=xnk, logw=logw_criterion, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate'],
+                skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1)
+            ))
+        new_epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
+        verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
+
         # T adaptation
         if adapt_n_leapfrog_steps:
             T, coupling_found = adapt_num_leapfrog_steps_contractivity(
@@ -159,21 +170,12 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                 plot_contractivity=plot_contractivity, max_tries=max_tries_find_coupling, T_max=T_max, T_min=T_min,
                 rng=rng)
             coupling_success_history.append(coupling_found)
-        verboseprint(f"\tT adapted to {T}")
-
-        # Step size adaptation
-        if adapt_step_size:
-            xnk[overflow_mask] = 0.0
-            epsilon_params.update(estimate_with_cond_variance(
-                xnk=xnk, logw=logw_criterion, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate'],
-                skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1)
-            ))
-        epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
-        verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
+        verboseprint(f"\tT: {T}")
+        epsilons = new_epsilons  # do it after, to avoid scoping/deepcopy issues
 
         # Storage
         epsilon_history.append(epsilons)
-        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if type(value) != callable})
+        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key != "params_to_estimate"})
         ess_history.append(ess)
         T_history.append(T)
 
