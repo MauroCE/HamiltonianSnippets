@@ -9,7 +9,7 @@ rc('font', **{'family': 'STIXGeneral'})
 
 def adapt_num_leapfrog_steps_contractivity(
         xnk: NDArray, vnk: NDArray, epsilons: NDArray, nlps: NDArray, nlls: NDArray, T: int,
-        gamma: float, inv_mass_diag: NDArray, compute_likelihoods_priors_gradients: callable,
+        gamma: float, mass_params: dict, compute_likelihoods_priors_gradients: callable,
         rng: np.random.Generator, max_tries: int = 100, plot_contractivity: bool = False, T_max: int = 100,
         T_min: int = 5) -> Tuple[int, bool]:
     """Adapts the number of leapfrog steps using a contractivity argument.
@@ -30,8 +30,8 @@ def adapt_num_leapfrog_steps_contractivity(
     :type T: int
     :param gamma: Current tempering parameter \\gamma_{n-1}
     :type gamma: float
-    :param inv_mass_diag: Diagonal of the inverse of the mass matrix
-    :type inv_mass_diag: np.array
+    :param mass_params: Mass matrix parameters
+    :type mass_params: dict
     :param compute_likelihoods_priors_gradients: Function computing nlps, gnlps, nlls, gnlls
     :type compute_likelihoods_priors_gradients: callable
     :param rng: Random number generator for reproducibility
@@ -73,12 +73,18 @@ def adapt_num_leapfrog_steps_contractivity(
             T=T,
             epsilons=eps_coupled[coupling[:, 1]],
             gamma_curr=gamma,
-            inv_mass_diag_curr=inv_mass_diag,
+            mass_params=mass_params,
             compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients
         )
 
+        # Check for overflow errors on xnk just generated
+        ofm0 = np.any(~np.isfinite(xnk[coupling[:, 0]]), axis=2)  # (N//2, T+1) True when particle overflown
+        ofm1 = np.any(~np.isfinite(xnk[coupling[:, 1]]), axis=2)  # (N//2, T+1) True when particle overflown
+        ofm = ofm0 | ofm1  # (N//2, T+1) True when either of the coupled particles overflown
+
         # Compute contractivity between coupled trajectories
-        contractivity = np.linalg.norm(xnk[coupling[:, 0]] - xnk[coupling[:, 1]], axis=2)  # (N//2, T+1)
+        contractivity = np.full(fill_value=np.inf, shape=(N//2, Tplus1))
+        contractivity[~ofm] = np.linalg.norm(xnk[coupling[:, 0]][~ofm] - xnk[coupling[:, 1]][~ofm], axis=1)  # 2)  # (N//2, T+1)
         contractivity /= contractivity[:, 0].reshape(-1, 1)
         contractivity = np.clip(contractivity, a_min=None, a_max=5)  # to avoid coupled particles diverging too much
 
@@ -94,7 +100,7 @@ def adapt_num_leapfrog_steps_contractivity(
         taus = np.arange(Tplus1).reshape(1, -1) * eps_coupled[coupling[:, 0]].reshape(-1, 1)  # (N//2, T+1)
 
         # Compute a binned average of the contractivity as a function of tau
-        avg_contraction, tau_bins = binned_average(contractivity, taus, Tplus1)  # min used to avoid wasting computation, the curve should be fine enough
+        avg_contraction, tau_bins = binned_average(contractivity, taus, max(100, np.sqrt(N)))  #Tplus1)  # min used to avoid wasting computation, the curve should be fine enough
         tau_min_contraction = tau_bins[np.nanargmin(avg_contraction)]  # tau corresponding to the minimum average contraction
         median_eps_bottom = np.quantile(eps_coupled[coupling[:, 0]][bottom_i], q=0.5)  # median epsilon corresponding to tail of contraction distribution
         bottom_taus_median = np.quantile(bottom_taus, q=0.5)  # median of taus corresponding to tail of contraction distribution

@@ -1,12 +1,12 @@
 import numpy as np
 
 
-def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likelihoods_priors_gradients):
+def leapfrog(x, v, T, epsilons, gamma_curr, mass_params, compute_likelihoods_priors_gradients):
     """Leapfrog integration """
     N, d = x.shape
     if len(epsilons.shape) == 1:
         epsilons = epsilons[:, None]
-    inv_mass_diag_curr = inv_mass_diag_curr[None, :]
+    # inv_mass_diag_curr = inv_mass_diag_curr[None, :]
 
     # Select momentum update function
     mom_update = lambda gnlp, gnll: epsilons*(gnlp + gamma_curr*gnll)
@@ -29,7 +29,7 @@ def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likeliho
     for k in range(T-1):
 
         # Full position step
-        x = x + epsilons*(v * inv_mass_diag_curr)
+        x = x + epsilons*inv_mass_times_v(v, mass_params)  # (v * inv_mass_diag_curr)
 
         # Full momentum step
         nlps[:, k+1], gnlps, nlls[:, k+1], gnlls = compute_likelihoods_priors_gradients(x)
@@ -40,7 +40,7 @@ def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likeliho
         xnk[:, k+1] = x
 
     # Final position half-step
-    x = x + epsilons*(v * inv_mass_diag_curr)
+    x = x + epsilons*inv_mass_times_v(v, mass_params)  #(v * inv_mass_diag_curr)
 
     # Final momentum half-step
     nlps[:, -1], gnlps, nlls[:, -1], gnlls = compute_likelihoods_priors_gradients(x)
@@ -51,3 +51,11 @@ def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likeliho
     vnk[:, -1] = v
 
     return xnk, vnk, nlps, nlls
+
+
+def inv_mass_times_v(v, mass_params):
+    """Computes M^{-1} v for the various scenarios."""
+    if mass_params['matrix_type'] == "diag":
+        return v / mass_params['mass_diag_curr'][None, :]  # (N, d)
+    else:
+        return np.linalg.solve(mass_params['mass_curr'], v.T).T  # (N, d)

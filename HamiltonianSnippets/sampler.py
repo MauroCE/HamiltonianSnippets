@@ -1,21 +1,21 @@
 import time
 import numpy as np
 from typing import Optional
-from numpy.typing import NDArray
 from scipy.special import logsumexp
-from copy import deepcopy
 
 from .leapfrog_integration import leapfrog
-from .weight_computations import compute_weights
+from .weight_computations import compute_weights_new
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
+from .mass_matrix_adaptation import adapt_mass_matrix
 from .utils import next_annealing_param
 from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps_contractivity
 
 
-def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
+def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
                         compute_likelihoods_priors_gradients: callable, epsilon_params: dict,
+                        mass_params: dict,
                         act_on_overflow: bool = False, adapt_step_size: bool = False,
-                        adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False, adapt_mass: bool = False,
+                        adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False,
                         plot_contractivity: bool = False, T_max: int = 100, T_min: int = 5,
                         max_tries_find_coupling: int = 100,
                         verbose: bool = True, seed: Optional[int] = None):
@@ -27,8 +27,6 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :type N: int
     :param T: Number of integration steps
     :type T: int
-    :param mass_diag: Diagonal of the mass matrix
-    :type mass_diag: np.ndarray
     :param ESSrmin: Proportion of `N` that we target as our ESS when finding the next tempering parameter
     :type ESSrmin: float
     :param sample_prior: Function to sample from the prior, should take `N` and `rng` as arguments and return an array
@@ -48,8 +46,8 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :type adapt_n_leapfrog_steps: bool
     :param skip_overflown: Whether to skip overflown trajectories when estimating epsilon
     :type skip_overflown: bool
-    :param adapt_mass: Whether to adapt the mass matrix diagonal or not
-    :type adapt_mass: bool
+    :param mass_params: Parameters for mass matrix
+    :type mass_params: dict
     :param plot_contractivity: Whether to plot the contractivity at each step
     :type plot_contractivity: bool
     :param T_max: Maximum budget for the number of integration steps
@@ -65,27 +63,29 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     """
     assert isinstance(N, int) and N >= 1, "Number of particles must be a positive integer."
     assert isinstance(T, int) and T >= 1, "Number of integration steps must be a positive integer."
-    assert T_max > T_min, "Maximum number of integration steps must be larger than minimum number."
+    assert T_max >= T_min, "Maximum number of integration steps must be larger than minimum number."
     assert max_tries_find_coupling > 1, "Maximum number of tries to find a coupling must be >= 1."
 
     # Set up time-keeping, random number generation, printing, iterations, mass_matrix and more
     start_time = time.time()
     rng = np.random.default_rng(seed=seed if seed is not None else np.random.randint(low=0, high=10000000))
     verboseprint = print if verbose else lambda *a, **kwargs: None
+    mass_params = process_mass_params(mass_params)
     n = 1
 
     # Initialize particles, epsilons
     x = sample_prior(N, rng)
     d = x.shape[1]
-    mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
-    v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
+    # mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
+    v = sample_velocities(mass_params, N, d, rng)  # (N, d)
+    # v = transform_v(rng.normal(loc=0, scale=1, size=(N, d)), mass_params, 0.0)  # rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
 
     # Initial step sizes and mass matrix
     epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
 
     # Storage
     epsilon_history = [epsilons]
-    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key != "params_to_estimate"}]  # parameters for the epsilon distribution
+    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow"]}]  # parameters for the epsilon distribution
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
@@ -96,7 +96,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .5f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]}")
 
         # Construct trajectories
-        xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
+        xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], mass_params, compute_likelihoods_priors_gradients)
         verboseprint("\tTrajectories constructed.")
 
         # Check if there is any inf due to overflow error
@@ -118,35 +118,20 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         verboseprint(f"\tNext gamma selected: {gammas[-1]: .5f}")
 
         # Estimate new mass matrix diagonal using importance sampling
-        if adapt_mass:
-            W_mass_est, _, _, _, _ = compute_weights(
-                vnk, nlps, nlls, 1/mass_diag_curr, 1/mass_diag_curr, gammas[n], gammas[n-1],
-                overflow_mask=overflow_mask
-            )
-            weighted_mean = np.average(xnk.reshape(-1, d)[~overflow_mask.ravel()], axis=0, weights=W_mass_est.ravel()[~overflow_mask.ravel()])  # (d, )
-            mass_diag_next = 1 / np.average((xnk.reshape(-1, d)[~overflow_mask.ravel()] - weighted_mean)**2, axis=0, weights=W_mass_est.ravel()[~overflow_mask.ravel()])
-            verboseprint(f"\tNew mass matrix diagonal estimated. Mean {mass_diag_next.mean()}")
-        else:
-            mass_diag_next = mass_diag_curr
+        mass_params = adapt_mass_matrix(mass_params=mass_params, xnk=xnk, vnk=vnk, nlps=nlps, nlls=nlls, gammas=gammas, n=n, overflow_mask=overflow_mask)
 
         # Compute weights and ESS
-        W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion = compute_weights(
-            vnk, nlps, nlls, 1/mass_diag_next, 1/mass_diag_curr, gammas[n], gammas[n-1], overflow_mask=overflow_mask)
+        W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion = compute_weights_new(
+            vnk=vnk, nlps=nlps, nlls=nlls, mass_params=mass_params, gamma_next=gammas[n], gamma_curr=gammas[n-1], overflow_mask=overflow_mask
+        )
         ess = 1 / np.sum(W_folded**2)  # folded ESS
         verboseprint(f"\tWeights Computed. Folded ESS {ess: .3f}")
-
-        # Set the new cov matrix to the old one
-        mass_diag_curr = mass_diag_next
 
         # Resample N particles out of N*(T+1) proportionally to unfolded weights
         A = rng.choice(a=N*(T+1), size=N, replace=True, p=W_unfolded.ravel())  # (N, )
         i_indices, k_indices = np.unravel_index(A, (N, T+1))  # (N, ) particles indices, (N, ) trajectory indices
         x = xnk[i_indices, k_indices]  # (N, d) resampled positions
         verboseprint(f"\tParticles resampled. PM {np.sum(k_indices > 0) / N: .3f}")
-
-        # Refresh velocities
-        v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
-        verboseprint("\tVelocities refreshed.")
 
         # Compute log-normalizing constant estimates
         logLt += logsumexp(logw_folded) - np.log(N)
@@ -166,16 +151,23 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         if adapt_n_leapfrog_steps:
             T, coupling_found = adapt_num_leapfrog_steps_contractivity(
                 xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-                inv_mass_diag=1/mass_diag_curr, compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+                mass_params=mass_params, compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
                 plot_contractivity=plot_contractivity, max_tries=max_tries_find_coupling, T_max=T_max, T_min=T_min,
                 rng=rng)
             coupling_success_history.append(coupling_found)
         verboseprint(f"\tT: {T}")
         epsilons = new_epsilons  # do it after, to avoid scoping/deepcopy issues
 
+        # Set the new cov matrix to the old one
+        mass_params = curr_mass_becomes_next_mass(mass_params)  # mass_diag_curr = mass_diag_next
+
+        # Refresh velocities
+        v = sample_velocities(mass_params, N, d, rng)  # rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
+        verboseprint("\tVelocities refreshed.")
+
         # Storage
         epsilon_history.append(epsilons)
-        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key != "params_to_estimate"})
+        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow"]})
         ess_history.append(ess)
         T_history.append(T)
 
@@ -184,3 +176,52 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilon_history, "ess": ess_history,
             'epsilon_params_history': epsilon_params_history, 'T_history': T_history,
             'coupling_success_history': coupling_success_history}
+
+
+def curr_mass_becomes_next_mass(mass_params):
+    """We set curr <- next so that we can refresh the velocities easily using the same function."""
+    term = '' if mass_params['matrix_type'] == 'full' else 'diag_'
+    mass_params[f'mass_{term}curr'] = mass_params[f'mass_{term}next']
+    mass_params[f'chol_mass_{term}curr'] = mass_params[f'chol_mass_{term}next']
+    mass_params['log_det_mass_curr'] = mass_params['log_det_mass_next']
+    return mass_params
+
+
+def process_mass_params(mass_params):
+    """Pre-processes mass params."""
+    assert "strategy" in mass_params, "Mass Matrix parameters must contain 'strategy'."
+    assert "matrix_type" in mass_params, "Mass Matrix parameters must contain `matrix_type`."
+    assert mass_params['strategy'] in {'fixed', 'schedule', 'adaptive'}, "Mass Matrix strategy must be one of `fixed, `schedule` or `adaptive`."
+    assert mass_params['matrix_type'] in {'diag', 'full'}, "Mass matrix type must be one of `diag` or `full`."
+    assert (mass_params['matrix_type'] == "full" and len(mass_params['mass'].shape) == 2) or (mass_params['matrix_type'] == "diag" and len(mass_params['mass'].shape) == 1), "When matrix_type=full, then one must provide mass to be a matrix, when matrix_type=diag, one must provide the vector corresponding to its diagonal"
+    if mass_params['strategy'] == 'adaptive' and mass_params['matrix_type'] == 'full':
+        raise NotImplementedError("Mass Matrix adaptation with a full mass matrix is not implemented.")
+    if mass_params["strategy"] == "schedule" and "schedule_func" not in mass_params:
+        raise ValueError("When using a full mass matrix schedule, one must provide a schedule function.")
+    term = '' if mass_params['matrix_type'] == 'full' else 'diag_'
+
+    # Set the current mass matrix, cholesky, log det, etc. (current meaning at gamma=0.0)
+    mass_params[f'mass_{term}curr'] = mass_params['mass'] if mass_params['strategy'] != "schedule" else mass_params['schedule_func'](0.0)
+    mass_params[f'chol_mass_{term}curr'] = np.linalg.cholesky(mass_params['mass']) if mass_params['matrix_type'] == "full" else np.sqrt(mass_params['mass'])
+    mass_params['log_det_mass_curr'] = np.linalg.slogdet(mass_params['mass']).logabsdet if mass_params['matrix_type'] == "full" else np.sum(np.log(mass_params['mass']))
+
+    if mass_params['strategy'] == "fixed" or mass_params['strategy'] == "adaptive":
+        # Set next = curr. For adaptive, we do it so that we can compute the weights used in the mass matrix adaptation, since
+        # those will require
+        mass_params[f'mass_{term}next'] = mass_params[f'mass_{term}curr']
+        mass_params[f'chol_mass_{term}next'] = mass_params[f'chol_mass_{term}curr']
+        mass_params['log_det_mass_next'] = mass_params['log_det_mass_curr']
+    return mass_params
+
+
+def sample_velocities(mass_params, N, d, rng):
+    """Given samples v of shape (N, d) sampled from a standard normal, we use the mass params
+    to sample them from N(0, M)."""
+    v = rng.normal(loc=0, scale=1, size=(N, d))
+    match mass_params['strategy'], mass_params['matrix_type']:
+
+        case ("fixed" | "schedule" | "adaptive"), "diag":
+            return mass_params['chol_mass_diag_curr'] * v  # (N, d)
+
+        case ("fixed" | "schedule"), "full":
+            return v.dot(mass_params['chol_mass_curr'].T)  # (N, d)

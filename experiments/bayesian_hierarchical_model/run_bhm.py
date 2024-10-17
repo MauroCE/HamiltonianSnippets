@@ -28,12 +28,6 @@ def nlp_gnlp_nll_and_gnll(x):
     gnlp[:, 1:] = x[:, 1:] / np.exp(x[:, 0])  # (N, dim) - nala_log_p(z|theta)
 
 
-
-
-
-
-
-
 if __name__ == "__main__":
     # Generate data
     dim = 30
