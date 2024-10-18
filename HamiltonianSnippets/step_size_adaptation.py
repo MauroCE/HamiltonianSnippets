@@ -23,7 +23,7 @@ def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, 
     :type ss_dict: dict
     :param skip_overflown: Whether to skip the trajectories that had an epsilon that lead to overflow. Shape (N, )
     :type skip_overflown: bool
-    :param overflow_mask: Mask determining if the snippet has encoutered an overflow error
+    :param overflow_mask: Mask determining if the snippet has encountered an overflow error
     :type overflow_mask: np.ndarray
     :return: Dictionary of estimates for each sufficient statistics
     :rtype: dict
@@ -69,7 +69,20 @@ def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, 
 
 
 def sample_epsilons(eps_params: dict, N: int, rng: np.random.Generator) -> NDArray:
-    """Samples epsilons according to the correct distribution."""
+    """Samples epsilons according to the correct distribution. Currently, only two options are available, either an
+    inverse gaussian with a fixed skewness or a discrete uniform distribution.
+
+    Parameters
+    ----------
+    :param eps_params: Step size parameters
+    :type eps_params: dict
+    :param N: Number of step sizes to sample, should be the same as the number of particles
+    :type N: int
+    :param rng: Random number generator for reproducibility
+    :type: np.random.Generator
+    :return: Array of sampled step sizes of shape (N, )
+    :rtype: np.ndarray
+    """
     assert 'distribution' in eps_params, "Epsilon parameters must contain a key 'distribution'."
     match eps_params['distribution']:
 
