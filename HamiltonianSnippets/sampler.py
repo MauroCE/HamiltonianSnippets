@@ -2,11 +2,12 @@ import time
 import numpy as np
 from typing import Optional
 from scipy.special import logsumexp
+from numpy.typing import NDArray
 
 from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
-from .mass_matrix_adaptation import adapt_mass_matrix
+from .mass_matrix_adaptation import update_mass_matrix
 from .utils import next_annealing_param
 from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps_contractivity
 
@@ -18,7 +19,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
                         adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False,
                         plot_contractivity: bool = False, T_max: int = 100, T_min: int = 5,
                         max_tries_find_coupling: int = 100,
-                        verbose: bool = True, seed: Optional[int] = None):
+                        verbose: bool = True, seed: Optional[int] = None) -> dict:
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
     Parameters
@@ -60,6 +61,8 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     :type verbose: bool
     :param seed: Seed for the random number generator
     :type seed: int or None
+    :return: A dictionary with the results of the Hamiltonian snippet
+    :rtype: dict
     """
     assert isinstance(N, int) and N >= 1, "Number of particles must be a positive integer."
     assert isinstance(T, int) and T >= 1, "Number of integration steps must be a positive integer."
@@ -118,7 +121,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         verboseprint(f"\tNext gamma selected: {gammas[-1]: .5f}")
 
         # Estimate new mass matrix diagonal using importance sampling
-        mass_params = adapt_mass_matrix(mass_params=mass_params, xnk=xnk, vnk=vnk, nlps=nlps, nlls=nlls, gammas=gammas, n=n, overflow_mask=overflow_mask)
+        mass_params = update_mass_matrix(mass_params=mass_params, xnk=xnk, vnk=vnk, nlps=nlps, nlls=nlls, gammas=gammas, n=n, overflow_mask=overflow_mask)
 
         # Compute weights and ESS
         W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion = compute_weights(
@@ -178,8 +181,16 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
             'coupling_success_history': coupling_success_history}
 
 
-def curr_mass_becomes_next_mass(mass_params):
-    """We set curr <- next so that we can refresh the velocities easily using the same function."""
+def curr_mass_becomes_next_mass(mass_params: dict) -> dict:
+    """We set curr <- next so that we can refresh the velocities easily using the same function.
+
+    Parameters
+    ----------
+    :param mass_params: Current mass matrix parameters
+    :type mass_params: dict
+    :return: Updated mass matrix parameters where everything with 'curr' is overwritten by 'next'
+    :rtype: dict
+    """
     term = '' if mass_params['matrix_type'] == 'full' else 'diag_'
     mass_params[f'mass_{term}curr'] = mass_params[f'mass_{term}next']
     mass_params[f'chol_mass_{term}curr'] = mass_params[f'chol_mass_{term}next']
@@ -187,8 +198,18 @@ def curr_mass_becomes_next_mass(mass_params):
     return mass_params
 
 
-def process_mass_params(mass_params):
-    """Pre-processes mass params."""
+def process_mass_params(mass_params: dict) -> dict:
+    """Pre-processes mass params by filling-in the current mass matrix and the next mass matrix, the latter of which
+    is set to be identical to the current one. It will be overwritten later, but it is necessary for mass matrix
+    adaptation.
+
+    Parameters
+    ----------
+    :param mass_params: Mass matrix parameters
+    :type mass_params: dict
+    :return: Post-processed mass matrix parameters
+    :rtype: dict
+    """
     assert "strategy" in mass_params, "Mass Matrix parameters must contain 'strategy'."
     assert "matrix_type" in mass_params, "Mass Matrix parameters must contain `matrix_type`."
     assert mass_params['strategy'] in {'fixed', 'schedule', 'adaptive'}, "Mass Matrix strategy must be one of `fixed, `schedule` or `adaptive`."
@@ -214,9 +235,23 @@ def process_mass_params(mass_params):
     return mass_params
 
 
-def sample_velocities(mass_params, N, d, rng):
+def sample_velocities(mass_params: dict, N: int, d: int, rng: np.random.Generator) -> NDArray:
     """Given samples v of shape (N, d) sampled from a standard normal, we use the mass params
-    to sample them from N(0, M)."""
+    to sample them from N(0, M).
+
+    Parameters
+    ----------
+    :param mass_params: Mass matrix parameters
+    :type mass_params: dict
+    :param N: Number of velocities to sample, should be equal to the number of particles
+    :type N: int
+    :param d: Dimensionality of the velocities
+    :type d: int
+    :param rng: Random number generator, used for reproducibility
+    :type rng: np.random.generator
+    :return: Sampled velocities of shape (N, d)
+    :rtype: np.ndarray
+    """
     v = rng.normal(loc=0, scale=1, size=(N, d))
     match mass_params['strategy'], mass_params['matrix_type']:
 

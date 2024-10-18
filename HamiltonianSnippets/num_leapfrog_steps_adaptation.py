@@ -44,6 +44,8 @@ def adapt_num_leapfrog_steps_contractivity(
     :type T_max: int
     :param T_min: Minimum number of integration steps allowed
     :type T_min: int
+    :return: A tuple (T, coupling_found) where T is the optimal num of leapfrog steps and the other a boolean flag
+    :rtype: tuple
     """
     assert isinstance(max_tries, int) and max_tries >= 1, "Maximum number of tries should be an integer >= 1."
     assert isinstance(T_min, int) and T_min >= 1, "Minimum number of integration steps must be an integer >= 1."
@@ -84,7 +86,7 @@ def adapt_num_leapfrog_steps_contractivity(
 
         # Compute contractivity between coupled trajectories
         contractivity = np.full(fill_value=np.inf, shape=(N//2, Tplus1))
-        contractivity[~ofm] = np.linalg.norm(xnk[coupling[:, 0]][~ofm] - xnk[coupling[:, 1]][~ofm], axis=1)  # 2)  # (N//2, T+1)
+        contractivity[~ofm] = np.linalg.norm(xnk[coupling[:, 0]][~ofm] - xnk[coupling[:, 1]][~ofm], axis=1)  # (N//2, T+1)
         contractivity /= contractivity[:, 0].reshape(-1, 1)
         contractivity = np.clip(contractivity, a_min=None, a_max=5)  # to avoid coupled particles diverging too much
 
@@ -100,7 +102,8 @@ def adapt_num_leapfrog_steps_contractivity(
         taus = np.arange(Tplus1).reshape(1, -1) * eps_coupled[coupling[:, 0]].reshape(-1, 1)  # (N//2, T+1)
 
         # Compute a binned average of the contractivity as a function of tau
-        avg_contraction, tau_bins = binned_average(contractivity, taus, max(100, np.sqrt(N)))  #Tplus1)  # min used to avoid wasting computation, the curve should be fine enough
+        n_bins = max(100, np.sqrt(N))
+        avg_contraction, tau_bins = binned_average(contractivity, taus, n_bins)  # (n_bins, ), (n_bins, )
         tau_min_contraction = tau_bins[np.nanargmin(avg_contraction)]  # tau corresponding to the minimum average contraction
         median_eps_bottom = np.quantile(eps_coupled[coupling[:, 0]][bottom_i], q=0.5)  # median epsilon corresponding to tail of contraction distribution
         bottom_taus_median = np.quantile(bottom_taus, q=0.5)  # median of taus corresponding to tail of contraction distribution
@@ -136,7 +139,7 @@ def adapt_num_leapfrog_steps_contractivity(
     return T, coupling_found
 
 
-def binned_average(y_values, x_values, n_bins) -> Tuple[NDArray, NDArray]:
+def binned_average(y_values: NDArray, x_values: NDArray, n_bins: int) -> Tuple[NDArray, NDArray]:
     """Computes a binned average of the squared norms over the taus.
 
     Parameters
