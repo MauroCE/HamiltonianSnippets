@@ -1,8 +1,9 @@
 from scipy.optimize import brentq
 import numpy as np
+from numpy.typing import NDArray
 
 
-def ess_from_log_weights(logw: np.ndarray) -> float:
+def ess_from_log_weights(logw: NDArray) -> float:
     """ESS (Effective sample size) computed from log-weights, this function has been copied from Nicholas Chopin
     `particles` package.
 
@@ -17,7 +18,7 @@ def ess_from_log_weights(logw: np.ndarray) -> float:
     return (w.sum()) ** 2 / np.sum(w ** 2)
 
 
-def next_annealing_param(gamma: float, ESSrmin: float, llk) -> float:
+def next_annealing_param(gamma: float, ESSrmin: float, llk: NDArray) -> float:
     """Find next annealing exponent by solving `ESS(exp(logw)) = alpha * N`.
 
     Parameters
@@ -42,6 +43,6 @@ def next_annealing_param(gamma: float, ESSrmin: float, llk) -> float:
         return 1.0
 
 
-def eps_to_str(epsilon):
+def eps_to_str(epsilon: float) -> str:
     """Simply replace . with 'dot'"""
     return str(float(epsilon)).replace(".", "dot")

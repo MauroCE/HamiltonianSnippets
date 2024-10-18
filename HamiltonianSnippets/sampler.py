@@ -121,7 +121,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         mass_params = adapt_mass_matrix(mass_params=mass_params, xnk=xnk, vnk=vnk, nlps=nlps, nlls=nlls, gammas=gammas, n=n, overflow_mask=overflow_mask)
 
         # Compute weights and ESS
-        W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion = compute_weights_new(
+        W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion = compute_weights(
             vnk=vnk, nlps=nlps, nlls=nlls, mass_params=mass_params, gamma_next=gammas[n], gamma_curr=gammas[n-1], overflow_mask=overflow_mask
         )
         ess = 1 / np.sum(W_folded**2)  # folded ESS
