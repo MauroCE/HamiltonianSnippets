@@ -3,6 +3,7 @@ import numpy as np
 from typing import Optional
 from scipy.special import logsumexp
 from numpy.typing import NDArray
+from copy import deepcopy
 
 from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
@@ -17,7 +18,9 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
                         mass_params: dict,
                         act_on_overflow: bool = False, adapt_step_size: bool = False,
                         adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False,
-                        plot_contractivity: bool = False, T_max: int = 100, T_min: int = 5,
+                        plot_contractivity: bool = False, plot_Q_criterion: bool = False, T_max: int = 100,
+                        T_min: int = 5,
+                        max_contractivity: int = 3,
                         max_tries_find_coupling: int = 100,
                         verbose: bool = True, seed: Optional[int] = None) -> dict:
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
@@ -51,10 +54,14 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     :type mass_params: dict
     :param plot_contractivity: Whether to plot the contractivity at each step
     :type plot_contractivity: bool
+    :param plot_Q_criterion: Whether to plot the Q criterion at each iteration
+    :type plot_Q_criterion: bool
     :param T_max: Maximum budget for the number of integration steps
     :type T_max: int
     :param T_min: Minimum budget for the number of integration steps
     :type T_min: int
+    :param max_contractivity: Maximum contractivity. Larger values are clipped to this
+    :type max_contractivity: int
     :param max_tries_find_coupling: Number of maximum tries used to try to find a coupling
     :type max_tries_find_coupling: int
     :param verbose: Whether to print progress of the algorithm
@@ -141,11 +148,13 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         verboseprint(f"\tLogLt {logLt}")
 
         # Step size adaptation
+        # TODO: make sure xnk[overflow_mask] = 0.0 is not fucking up T adaptation
         if adapt_step_size:
-            xnk[overflow_mask] = 0.0
+            xnk_for_eps_adaptation = deepcopy(xnk)
+            xnk_for_eps_adaptation[overflow_mask] = 0.0
             epsilon_params.update(estimate_with_cond_variance(
-                xnk=xnk, logw=logw_criterion, epsilons=epsilons, ss_dict=epsilon_params['params_to_estimate'],
-                skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1)
+                xnk=xnk_for_eps_adaptation, logw_criterion=logw_criterion, epsilons=epsilons, epsilon_params=epsilon_params,
+                skip_overflown=skip_overflown, overflow_mask=overflow_mask.any(axis=1), plot_Q_criterion=plot_Q_criterion
             ))
         new_epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
         verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
@@ -156,6 +165,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
                 xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
                 mass_params=mass_params, compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
                 plot_contractivity=plot_contractivity, max_tries=max_tries_find_coupling, T_max=T_max, T_min=T_min,
+                max_contractivity=max_contractivity,
                 rng=rng)
             coupling_success_history.append(coupling_found)
         verboseprint(f"\tT: {T}")

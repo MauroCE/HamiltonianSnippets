@@ -11,7 +11,7 @@ def adapt_num_leapfrog_steps_contractivity(
         xnk: NDArray, vnk: NDArray, epsilons: NDArray, nlps: NDArray, nlls: NDArray, T: int,
         gamma: float, mass_params: dict, compute_likelihoods_priors_gradients: callable,
         rng: np.random.Generator, max_tries: int = 100, plot_contractivity: bool = False, T_max: int = 100,
-        T_min: int = 5) -> Tuple[int, bool]:
+        T_min: int = 5, max_contractivity: int = 3) -> Tuple[int, bool]:
     """Adapts the number of leapfrog steps using a contractivity argument.
 
     Parameters
@@ -44,11 +44,14 @@ def adapt_num_leapfrog_steps_contractivity(
     :type T_max: int
     :param T_min: Minimum number of integration steps allowed
     :type T_min: int
+    :param max_contractivity: Maximum contractivity that contractivities are clipped to
+    :type max_contractivity: int
     :return: A tuple (T, coupling_found) where T is the optimal num of leapfrog steps and the other a boolean flag
     :rtype: tuple
     """
     assert isinstance(max_tries, int) and max_tries >= 1, "Maximum number of tries should be an integer >= 1."
     assert isinstance(T_min, int) and T_min >= 1, "Minimum number of integration steps must be an integer >= 1."
+    assert isinstance(max_contractivity, int) and max_contractivity >= 1, "Max contractivity must be at least 1."
     N, Tplus1, d = xnk.shape
 
     # Couple velocities and epsilons
@@ -88,7 +91,7 @@ def adapt_num_leapfrog_steps_contractivity(
         contractivity = np.full(fill_value=np.inf, shape=(N//2, Tplus1))
         contractivity[~ofm] = np.linalg.norm(xnk[coupling[:, 0]][~ofm] - xnk[coupling[:, 1]][~ofm], axis=1)  # (N//2, T+1)
         contractivity /= contractivity[:, 0].reshape(-1, 1)
-        contractivity = np.clip(contractivity, a_min=None, a_max=5)  # to avoid coupled particles diverging too much
+        contractivity = np.clip(contractivity, a_min=None, a_max=max_contractivity)  # to avoid coupled particles diverging too much
 
         # Find left tail of contractivity distribution
         bottom_quantile_val = 0.1

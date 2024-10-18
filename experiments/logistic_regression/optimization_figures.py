@@ -444,7 +444,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                 # shifted_upsilons = upsilons #- upsilons.min()
                 fig, ax = plt.subplots(figsize=(4, 4), sharex=True, sharey=True)
                 # ax.scatter(epsilons, upsilon, alpha=0.5)
-                counts, bins, bars = ax.hist(epsilons, bins=50, density=True, color='lightcoral', ec='brown', zorder=10, label=r'$\mathregular{\nu_{n-1}}$')
+                counts, bins, bars = ax.hist(epsilons, bins=50, density=True, color='lightcoral', ec='brown', zorder=10, label=r'$\mathregular{\nu_{\theta_{n-1}}}$')
                 _ = [b.remove() for b in bars]
                 # sns.kdeplot(epsilons, color='lightcoral', ax=ax[0], label=r'$\mathregular{\nu_{n-1}}$')
                 # sns.kdeplot(new_epsilons, color='lightseagreen', ax=ax[0], label=r'$\mathregular{\nu_{n}}$')
@@ -457,22 +457,23 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                 # ax[1].scatter(epsilons_fake, (shidted_upsilons_fake / shidted_upsilons_fake.max()) * counts.max(), alpha=0.5, zorder=0, color='gold', ec='goldenrod')
                 # ax[1].scatter(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (counts.max()), alpha=0.5, zorder=1, color='thistle', ec='violet')
                 ax2 = ax.twinx()
-                ax2.plot(xaxis_vals, invgauss(mu=old_mean/old_lambda, loc=0, scale=old_lambda).pdf(xaxis_vals), color='gold', zorder=1, lw=2, label=r'$\mathregular{\nu_{n-1}}$')
-                ax2.plot(xaxis_vals, invgauss(mu=estimate/new_lambda, loc=0, scale=new_lambda).pdf(xaxis_vals), color='indianred', zorder=2, lw=2, label=r'$\mathregular{\nu_{n}}$')
+                ax2.plot(xaxis_vals, invgauss(mu=old_mean/old_lambda, loc=0, scale=old_lambda).pdf(xaxis_vals), color='gold', zorder=1, lw=2, label=r'$\mathregular{\nu_{\theta_{n-1}}}$')
+                ax2.plot(xaxis_vals, invgauss(mu=estimate/new_lambda, loc=0, scale=new_lambda).pdf(xaxis_vals), color='indianred', zorder=2, lw=2, label=r'$\mathregular{\nu_{\theta_n}}$')
                 ax.set_xlabel(r"$\mathregular{\epsilon}$", fontsize=13)
-                ax.set_ylabel(r'$\mathregular{log\,\upsilon_n(\epsilon, z)}$', fontsize=13) #"Criterion")
+                ax.set_ylabel(r'$\mathregular{log\,\upsilon_{\gamma_{n-1}}(\epsilon, z)}$', fontsize=13) #"Criterion")
                 ax2.set_ylabel("Density", fontsize=13)
-                proxy_hist2d = mpatches.Patch(color='cornflowerblue', label=r'$\mathregular{\upsilon_n(\epsilon, z)}$')
+                proxy_hist2d = mpatches.Patch(color='cornflowerblue', label=r'$\mathregular{\upsilon_{\gamma_{n-1}}(\epsilon, z)}$')
                 handles, labels = ax2.get_legend_handles_labels()
                 # handles.append(proxy_hist2d)
                 # ax[1].scatter(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (hist_out[0].max()), alpha=0.5, zorder=0, label='upsilon')
                 # new_hist_out = ax[2].hist(new_epsilons, bins=50, density=True, color='lightseagreen', ec='teal', zorder=8,  label=r'$\mathregular{\nu_{n}}$')
                 # sns.kdeplot(epsilons, ax=ax)            #ax.hist2d(epsilons, absolute_upsilons, bins=30, cmap='Blues', zorder=0, label=r'$\mathregular{\upsilon(\epsilon, z))}$')
-                #ax.scatter(epsilons, absolute_upsilons, alpha=0.5)
+                # ax.scatter(epsilons, absolute_upsilons, alpha=0.5)
                 # ax.set_xscale('log')
                 plt.tight_layout()
                 ax2.legend(handles=handles)
                 plt.colorbar(hist2d[3], ax=ax, label='Counts', orientation='horizontal', location='top')
+                plt.savefig(f"results/optim_figures/optim_figure_{n}_skewness{skewness}.png", dpi=100)
                 plt.show()
             except ValueError:
                 print("\tSkipping plot.")
@@ -504,7 +505,7 @@ if __name__ == "__main__":
     compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function(_y=y, _Z=Z, _scales=scales)
 
     # Run Hamiltonian snippets
-    n_runs = 20
+    n_runs = 1 # 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
     step_sizes = [0.001] #np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
@@ -513,7 +514,7 @@ if __name__ == "__main__":
     skewness = 3  # a large skewness helps avoiding a large bias
     mass_matrix_adaptation = False
     mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
-    verbose = False
+    verbose = True
     skipo = False
     aoo = False
     adapt_step_size = True
