@@ -1,7 +1,10 @@
 import numpy as np
+from numpy.typing import NDArray
+from typing import Tuple
 
 
-def leapfrog(x, v, T, epsilons, gamma_curr, mass_params, compute_likelihoods_priors_gradients):
+def leapfrog(x: NDArray, v: NDArray, T: int, epsilons: NDArray, gamma_curr: float, mass_params: dict,
+             compute_likelihoods_priors_gradients: callable) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
     """Leapfrog integration """
     N, d = x.shape
     if len(epsilons.shape) == 1:
@@ -53,7 +56,7 @@ def leapfrog(x, v, T, epsilons, gamma_curr, mass_params, compute_likelihoods_pri
     return xnk, vnk, nlps, nlls
 
 
-def inv_mass_times_v(v, mass_params):
+def inv_mass_times_v(v: NDArray, mass_params: dict):
     """Computes M^{-1} v for the various scenarios."""
     if mass_params['matrix_type'] == "diag":
         return v / mass_params['mass_diag_curr'][None, :]  # (N, d)

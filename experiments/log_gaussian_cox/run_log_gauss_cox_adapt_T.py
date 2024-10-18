@@ -192,12 +192,12 @@ if __name__ == "__main__":
 
     # Settings
     N = 500
-    T = 200
+    T = 80
     skewness = 1
     aoo = False  # whether to act on overflow
     skipo = False  # skip overflown trajectories in epsilon computation
-    verbose = False
-    plot_contractivity = False
+    verbose = True
+    plot_contractivity = True
     adapt_T = False
     adapt_epsilon = False
     adapt_mass = False
@@ -229,14 +229,13 @@ if __name__ == "__main__":
                 'schedule_func': params['metric_tensor_scheduling_func']
             }
             res = {'N': N, 'T': T, 'epsilon_params': {key: value for key, value in epsilon_params.items() if key != "params_to_estimate"}}
-            out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
+            out = hamiltonian_snippet(N=N, T=T, ESSrmin=0.8,
                                       sample_prior=sample_prior,
                                       compute_likelihoods_priors_gradients=lambda x: nlp_gnlp_nll_and_gnll(x, params),
                                       epsilon_params=epsilon_params,
                                       mass_params=mass_params,
                                       act_on_overflow=aoo,
                                       skip_overflown=skipo,
-                                      adapt_mass=adapt_mass,
                                       adapt_step_size=adapt_epsilon,
                                       adapt_n_leapfrog_steps=adapt_T,
                                       plot_contractivity=plot_contractivity,

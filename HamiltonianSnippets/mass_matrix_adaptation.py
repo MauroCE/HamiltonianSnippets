@@ -1,5 +1,5 @@
 import numpy as np
-from .weight_computations import compute_weights_new
+from .weight_computations import compute_weights
 
 
 def adapt_mass_matrix(mass_params, xnk, vnk, nlps, nlls, gammas, n, overflow_mask):
@@ -12,7 +12,7 @@ def adapt_mass_matrix(mass_params, xnk, vnk, nlps, nlls, gammas, n, overflow_mas
             if mass_params['strategy'] == "schedule":
                 mass_params['mass_diag_next'] = mass_params['schedule_func'](gammas[n])  # Mass Matrix diagonal
             else:
-                W_mass_est, _, _, _, _ = compute_weights_new(
+                W_mass_est, _, _, _, _ = compute_weights(
                     vnk=vnk, nlps=nlps, nlls=nlls, mass_params=mass_params, gamma_next=gammas[n], gamma_curr=gammas[n-1],
                     computation_for_mass_matrix_adaptation=True,
                     overflow_mask=overflow_mask

@@ -4,7 +4,7 @@ from typing import Optional
 from scipy.special import logsumexp
 
 from .leapfrog_integration import leapfrog
-from .weight_computations import compute_weights_new
+from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .mass_matrix_adaptation import adapt_mass_matrix
 from .utils import next_annealing_param
