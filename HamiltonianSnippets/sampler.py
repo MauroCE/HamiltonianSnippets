@@ -22,6 +22,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
                         T_min: int = 5,
                         max_contractivity: int = 3,
                         max_tries_find_coupling: int = 100,
+                        variables_to_track: Optional[list] = None,
                         verbose: bool = True, seed: Optional[int] = None) -> dict:
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
@@ -64,6 +65,8 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     :type max_contractivity: int
     :param max_tries_find_coupling: Number of maximum tries used to try to find a coupling
     :type max_tries_find_coupling: int
+    :param variables_to_track: List of variables that we wish to track across iterations, by default it is None
+    :type variables_to_track: list
     :param verbose: Whether to print progress of the algorithm
     :type verbose: bool
     :param seed: Seed for the random number generator
@@ -86,9 +89,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     # Initialize particles, epsilons
     x = sample_prior(N, rng)
     d = x.shape[1]
-    # mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
     v = sample_velocities(mass_params, N, d, rng)  # (N, d)
-    # v = transform_v(rng.normal(loc=0, scale=1, size=(N, d)), mass_params, 0.0)  # rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
 
     # Initial step sizes and mass matrix
     epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
@@ -101,6 +102,10 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     logLt = 0.0
     T_history = [T]
     coupling_success_history = []
+
+    # Store/track variables
+    trackable_vars = {'epsilons': epsilons}
+    storage = {var: [trackable_vars[var]] for var in variables_to_track} if variables_to_track is not None else dict()
 
     while gammas[n-1] < 1.0:
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .5f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]}")
@@ -183,12 +188,16 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow"]})
         ess_history.append(ess)
         T_history.append(T)
+        trackable_vars.update({'epsilons': epsilons})
+        if variables_to_track is not None:
+            for var in variables_to_track:
+                storage[var].append(trackable_vars[var])
 
         n += 1
     runtime = time.time() - start_time
     return {"logLt": logLt, "gammas": gammas, "runtime": runtime, "epsilons": epsilon_history, "ess": ess_history,
             'epsilon_params_history': epsilon_params_history, 'T_history': T_history,
-            'coupling_success_history': coupling_success_history}
+            'coupling_success_history': coupling_success_history, 'storage': storage}
 
 
 def curr_mass_becomes_next_mass(mass_params: dict) -> dict:
