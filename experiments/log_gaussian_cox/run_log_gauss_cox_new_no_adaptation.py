@@ -203,9 +203,9 @@ if __name__ == "__main__":
     max_contractivity = 3
     max_tries_find_coupling = 20
     mass_params = {
-        'strategy': 'fixed',
-        'matrix_type': 'full',
-        'mass': params['metric_tensor'],  # params['inv_covar'],
+        'strategy': 'adaptive',
+        'matrix_type': 'diag',
+        'mass': np.ones(grid_dim),
         'schedule_func': params['metric_tensor_scheduling_func']
     }
 

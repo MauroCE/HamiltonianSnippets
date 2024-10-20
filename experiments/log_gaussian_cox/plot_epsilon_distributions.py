@@ -44,5 +44,5 @@ for _eps_ix, eps in enumerate(eps_to_show):
     ax[_eps_ix].tick_params(axis='both', which='major', labelsize=8)
 ax[-1].set_xlabel("Iteration", fontsize=15)
 plt.tight_layout(h_pad=0.05)
-# plt.savefig("distribution_epsilons_over_iterations_1em6_1em3_10_1000_new.png")
+plt.savefig("distribution_epsilons_over_iterations_1em6_1em3_10_100_new_logcox.png")
 plt.show()

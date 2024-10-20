@@ -33,8 +33,8 @@ vertical_lines = np.arange(vertical_lines_start, (n_eps-1)*positions_every, posi
 show_fliers = True
 
 # Boxplots
-label_adaptive = "Skewness 3"
-label_fixed = "Non-Adaptive" # "Skewness 1"
+label_adaptive = "Adaptive"
+label_fixed = "Non-Adaptive"  # "Skewness 1"
 # fig, ax = plt.subplots(nrows=2, figsize=(12, 6), sharex=True)
 # bp_adapt = ax[0].boxplot(x=logLts_adapt, showfliers=show_fliers, positions=adapt_positions, patch_artist=True,
 #                          boxprops=dict(facecolor="lightseagreen", color="k"),
@@ -67,9 +67,9 @@ label_fixed = "Non-Adaptive" # "Skewness 1"
 #     ax[1].axvline(x=vert_line_pos, linestyle='--', color='darkgrey')
 # ax[1].set_xlabel(r"$\mathregular{\theta_0}$" + " (Initial Epsilons)", fontsize=13)
 # ax[1].set_ylabel("Log Normalizing Constant", fontsize=13)
-# ax[1].legend(handles=[bp_adapt_only["boxes"][0]], labels=[label_adaptive], loc='lower center', fontsize=9)
+# ax[1].legend(handles=[bp_adapt_only["boxes"][0]], labels=[label_adaptive], loc='lower left', fontsize=9)
 # plt.tight_layout()
-# # plt.savefig("boxplots_log_normalizing_constant_new.png")
+# plt.savefig("boxplots_log_normalizing_constant_logcox.png")
 # plt.show()
 
 
@@ -87,10 +87,10 @@ eps_means_fixed = np.array([res['out']['epsilon_params_history'][-1]['mean'] for
 # ax.set_xticklabels(["{:.4f}".format(eps) for eps in initial_epsilons], rotation=0)
 # for vert_line_pos in vertical_lines:
 #     ax.axvline(x=vert_line_pos, linestyle='--', color='darkgrey')
-# ax.set_xlabel("Initial Epsilons", fontsize=13)
+# ax.set_xlabel(r"$\mathregular{\theta_0}$" + " (Initial Epsilons)", fontsize=13)
 # ax.set_ylabel("Final Epsilon Mean", fontsize=13)
 # ax.legend(handles=[bp_adapt["boxes"][0]], labels=[label_adaptive], loc='upper center', fontsize=9)
-# # plt.savefig("boxplots_final_eps_mean_new.png")
+# plt.savefig("boxplots_final_eps_mean_new_logcox.png")
 # plt.show()
 
 #
@@ -137,6 +137,8 @@ ax.set_xticklabels(["{:.4f}".format(eps) for eps in initial_epsilons], rotation=
 for vert_line_pos in vertical_lines:
     ax.axvline(x=vert_line_pos, linestyle='--', color='darkgrey')
 ax.set_ylabel("Effective Sample Size", fontsize=13)
-ax.legend(handles=[bp_adapt["boxes"][0], bp_fixed["boxes"][0]], labels=[label_adaptive, label_fixed], loc="lower center", fontsize=9)
+ax.set_xlabel(r"$\mathregular{\theta_0}$" + " (Initial Epsilons)", fontsize=13)
+ax.legend(handles=[bp_adapt["boxes"][0], bp_fixed["boxes"][0]], labels=[label_adaptive, label_fixed], loc="upper center", fontsize=9)
 plt.tight_layout()
+plt.savefig("ess_logcox_adaptive_vs_fixed.png")
 plt.show()
