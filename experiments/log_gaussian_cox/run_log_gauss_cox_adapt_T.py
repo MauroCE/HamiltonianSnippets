@@ -122,7 +122,8 @@ def create_log_cox_parameters(N):
         'metric_tensor_diag': metric_tensor_diag,
         'inv_metric_tensor_diag': 1/metric_tensor_diag,
         'metric_tensor_scheduling_func_diag': lambda gamma: (gamma/dim)*np.exp(mu + covar_diag) + inv_covar_diag,
-        'metric_tensor_scheduling_func': lambda gamma: inv_covar + np.diag((gamma/dim)*np.exp(mu + covar_diag))
+        #'metric_tensor_scheduling_func': lambda gamma: inv_covar + (gamma/dim)*np.exp(mu + 0.5*sigma2)*np.eye(dim)
+        'metric_tensor_scheduling_func': lambda gamma: inv_covar + np.diag((gamma/dim)*np.exp(mu + covar_diag)) #lambda gamma: inv_covar + (gamma/dim)*np.exp(mu + 0.5*sigma2)*np.eye(dim)  # lambda gamma: inv_covar + np.diag((gamma/dim)*np.exp(mu + covar_diag))
     }
     return parameters
 
@@ -188,21 +189,31 @@ if __name__ == "__main__":
     n_runs = 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = [0.17]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9, endpoint=True))  # np.array() used only for pylint
+    step_sizes = np.array(np.geomspace(start=0.001, stop=10.0, num=9, endpoint=True))  # np.array() used only for pylint
 
     # Settings
     N = 500
-    T = 80
-    skewness = 1
+    T = 50
+    skewness = 3
     aoo = False  # whether to act on overflow
     skipo = False  # skip overflown trajectories in epsilon computation
-    verbose = True
-    plot_contractivity = True
-    adapt_T = False
-    adapt_epsilon = False
+    verbose = False
+    plot_contractivity = False
+    plot_Q_criterion = False
+    adapt_T = True
+    adapt_epsilon = True
     adapt_mass = False
-    T_max = T
-    T_min = 10
+    T_max = 200
+    T_min = 2
+    max_contractivity = 1.5
+    bottom_quantile_val = 0.05
+    max_tries_find_coupling = 20
+    mass_params = {
+        'strategy': 'schedule',
+        'matrix_type': 'full',
+        'mass': params['inv_covar'],
+        'schedule_func': params['metric_tensor_scheduling_func']
+    }
 
     results = []
     for i in range(n_runs):
@@ -217,18 +228,7 @@ if __name__ == "__main__":
                 'on_overflow': lambda param_dict: {'skewness': max(1, param_dict['skewness'] * 0.99)},
                 'param_for_T_adaptation': 'mean'
             }
-            # epsilon_params = {
-            #     'distribution': 'discrete_uniform',
-            #     'values': [eps],
-            #     'to_print': 'values',
-            # }
-            mass_params = {
-                'strategy': 'schedule',
-                'matrix_type': 'full',
-                'mass': params['inv_covar'],
-                'schedule_func': params['metric_tensor_scheduling_func']
-            }
-            res = {'N': N, 'T': T, 'epsilon_params': {key: value for key, value in epsilon_params.items() if key != "params_to_estimate"}}
+            res = {'N': N, 'T': T, 'epsilon_params': {key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow"]}}
             out = hamiltonian_snippet(N=N, T=T, ESSrmin=0.8,
                                       sample_prior=sample_prior,
                                       compute_likelihoods_priors_gradients=lambda x: nlp_gnlp_nll_and_gnll(x, params),
@@ -239,16 +239,20 @@ if __name__ == "__main__":
                                       adapt_step_size=adapt_epsilon,
                                       adapt_n_leapfrog_steps=adapt_T,
                                       plot_contractivity=plot_contractivity,
+                                      plot_Q_criterion=plot_Q_criterion,
                                       T_max=T_max,
                                       T_min=T_min,
-                                      max_tries_find_coupling=200,
+                                      max_tries_find_coupling=max_tries_find_coupling,
+                                      max_contractivity=max_contractivity,
+                                      bottom_quantile_val=bottom_quantile_val,
                                       verbose=verbose,
                                       seed=seeds[i])
             print(f"\t\tEps: {eps: .7f} \tLogLt: {out['logLt']: .1f} \tFinal ESS: {out['ess'][-1]: .1f}"
-                  f"\tEps: {epsilon_params['to_print'].capitalize()} Final T: {out['T_history'][-1]}"
-                  f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]} Seed {int(seeds[i])} ")
+                  f"\tEps {epsilon_params['to_print'].capitalize()}: {out['epsilon_params_history'][-1][epsilon_params['to_print']]} "
+                  f"\tFinal T: {out['T_history'][-1]}"
+                  f"\tSeed {int(seeds[i])}")
             res.update({'logLt': out['logLt'], 'out': out})
             results.append(res)
 
-    # with open(f"results/cox{grid_dim}_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}.pkl", "wb") as file:
+    # with open(f"results/new_adaptT_cox{grid_dim}_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}_minT{T_min}.pkl", "wb") as file:
     #     pickle.dump(results, file)

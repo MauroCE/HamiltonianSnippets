@@ -20,9 +20,12 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
                         adapt_n_leapfrog_steps: bool = False, skip_overflown: bool = False,
                         plot_contractivity: bool = False, plot_Q_criterion: bool = False, T_max: int = 100,
                         T_min: int = 5,
-                        max_contractivity: int = 3,
+                        max_contractivity: float = 3,
                         max_tries_find_coupling: int = 100,
                         variables_to_track: Optional[list] = None,
+                        bottom_quantile_val: float = 0.05,
+                        save_contractivity_fig: bool = False,
+                        contractivity_save_path: Optional[str] = None,
                         verbose: bool = True, seed: Optional[int] = None) -> dict:
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
@@ -67,6 +70,12 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     :type max_tries_find_coupling: int
     :param variables_to_track: List of variables that we wish to track across iterations, by default it is None
     :type variables_to_track: list
+    :param bottom_quantile_val: Quantile value defining the bottom of contractivity
+    :type bottom_quantile_val: float
+    :param save_contractivity_fig: Whether to save the contractivity figures
+    :type save_contractivity_fig: bool
+    :param contractivity_save_path: Path where to save contractivity figures
+    :type contractivity_save_path: str
     :param verbose: Whether to print progress of the algorithm
     :type verbose: bool
     :param seed: Seed for the random number generator
@@ -78,6 +87,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     assert isinstance(T, int) and T >= 1, "Number of integration steps must be a positive integer."
     assert T_max >= T_min, "Maximum number of integration steps must be larger than minimum number."
     assert max_tries_find_coupling > 1, "Maximum number of tries to find a coupling must be >= 1."
+    assert (not save_contractivity_fig and contractivity_save_path is None) or (save_contractivity_fig and contractivity_save_path is not None), "When save_contractivity_fig is True, you must provide a valid path to save the figures to."
 
     # Set up time-keeping, random number generation, printing, iterations, mass_matrix and more
     start_time = time.time()
@@ -96,7 +106,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
 
     # Storage
     epsilon_history = [epsilons]
-    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow"]}]  # parameters for the epsilon distribution
+    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow", "mode_func"]}]  # parameters for the epsilon distribution
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
@@ -168,9 +178,12 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         if adapt_n_leapfrog_steps:
             T, coupling_found = adapt_num_leapfrog_steps_contractivity(
                 xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-                mass_params=mass_params, compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+                mass_params=mass_params, eps_params=epsilon_params,
+                compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
                 plot_contractivity=plot_contractivity, max_tries=max_tries_find_coupling, T_max=T_max, T_min=T_min,
-                max_contractivity=max_contractivity,
+                max_contractivity=max_contractivity, bottom_quantile_val=bottom_quantile_val,
+                save_contractivity_fig=save_contractivity_fig, contractivity_save_path=contractivity_save_path,
+                n=n, seed=seed,
                 rng=rng)
             coupling_success_history.append(coupling_found)
         verboseprint(f"\tT: {T}")
@@ -185,7 +198,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
 
         # Storage
         epsilon_history.append(epsilons)
-        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow"]})
+        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow", "mode_func"]})
         ess_history.append(ess)
         T_history.append(T)
         trackable_vars.update({'epsilons': epsilons})

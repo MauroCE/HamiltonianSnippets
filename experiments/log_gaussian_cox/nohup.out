@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/maurocamara/Documents/HamiltonianSnippets/experiments/log_gaussian_cox/run_log_gauss_cox_adapt_T.py", line 3, in <module>
+    from HamiltonianSnippets.sampler import hamiltonian_snippet
+ModuleNotFoundError: No module named 'HamiltonianSnippets'
+Traceback (most recent call last):
+  File "/Users/maurocamara/Documents/HamiltonianSnippets/experiments/log_gaussian_cox/run_log_gauss_cox_adapt_T.py", line 3, in <module>
+    from HamiltonianSnippets.sampler import hamiltonian_snippet
+ModuleNotFoundError: No module named 'HamiltonianSnippets'

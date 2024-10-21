@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
-from typing import Tuple
+from typing import Tuple, Optional
 from .leapfrog_integration import leapfrog
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -9,9 +9,11 @@ rc('font', **{'family': 'STIXGeneral'})
 
 def adapt_num_leapfrog_steps_contractivity(
         xnk: NDArray, vnk: NDArray, epsilons: NDArray, nlps: NDArray, nlls: NDArray, T: int,
-        gamma: float, mass_params: dict, compute_likelihoods_priors_gradients: callable,
+        gamma: float, mass_params: dict, eps_params: dict, compute_likelihoods_priors_gradients: callable,
         rng: np.random.Generator, max_tries: int = 100, plot_contractivity: bool = False, T_max: int = 100,
-        T_min: int = 5, max_contractivity: int = 3) -> Tuple[int, bool]:
+        T_min: int = 5, max_contractivity: float = 3, bottom_quantile_val: float = 0.05,
+        save_contractivity_fig: bool = False, contractivity_save_path: Optional[str] = None,
+        n: Optional[int] = None, seed: Optional[int] = None) -> Tuple[int, bool]:
     """Adapts the number of leapfrog steps using a contractivity argument.
 
     Parameters
@@ -32,6 +34,8 @@ def adapt_num_leapfrog_steps_contractivity(
     :type gamma: float
     :param mass_params: Mass matrix parameters
     :type mass_params: dict
+    :param eps_params: Epsilon params
+    :type eps_params: dict
     :param compute_likelihoods_priors_gradients: Function computing nlps, gnlps, nlls, gnlls
     :type compute_likelihoods_priors_gradients: callable
     :param rng: Random number generator for reproducibility
@@ -45,13 +49,24 @@ def adapt_num_leapfrog_steps_contractivity(
     :param T_min: Minimum number of integration steps allowed
     :type T_min: int
     :param max_contractivity: Maximum contractivity that contractivities are clipped to
-    :type max_contractivity: int
+    :type max_contractivity: float
+    :param bottom_quantile_val: Quantile value for the minimum contractivity
+    :type bottom_quantile_val: float
+    :param save_contractivity_fig: Whether to save the contractivity figures at each step
+    :type save_contractivity_fig: bool
+    :param contractivity_save_path: Path where to save the contractivity figures, defaults to None
+    :type contractivity_save_path: str
+    :param n: Iteration number
+    :type n: int
+    :param seed: Reproducibility seed, used only for saving pictures
+    :type seed: int
     :return: A tuple (T, coupling_found) where T is the optimal num of leapfrog steps and the other a boolean flag
     :rtype: tuple
     """
     assert isinstance(max_tries, int) and max_tries >= 1, "Maximum number of tries should be an integer >= 1."
     assert isinstance(T_min, int) and T_min >= 1, "Minimum number of integration steps must be an integer >= 1."
-    assert isinstance(max_contractivity, int) and max_contractivity >= 1, "Max contractivity must be at least 1."
+    assert isinstance(max_contractivity, int | float) and max_contractivity >= 1, "Max contractivity must be at least 1."
+    assert 0 <= bottom_quantile_val <= 1.0, "bottom_quantile_val must be in [0,1]."
     N, Tplus1, d = xnk.shape
 
     # Couple velocities and epsilons
@@ -94,51 +109,62 @@ def adapt_num_leapfrog_steps_contractivity(
         contractivity = np.clip(contractivity, a_min=None, a_max=max_contractivity)  # to avoid coupled particles diverging too much
 
         # Find left tail of contractivity distribution
-        bottom_quantile_val = 0.1
         bottom_contractivity_flag = contractivity <= np.quantile(contractivity, q=bottom_quantile_val)
 
         # Find the i-indices and k-indices corresponding to tail contraction
         bottom_i, bottom_k = np.where(bottom_contractivity_flag)
         bottom_taus = eps_coupled[coupling[:, 0]][bottom_i] * bottom_k  # corresponding integration times
 
-        # Integration times corresponding to coupled particles
-        taus = np.arange(Tplus1).reshape(1, -1) * eps_coupled[coupling[:, 0]].reshape(-1, 1)  # (N//2, T+1)
-
         # Compute a binned average of the contractivity as a function of tau
         n_bins = max(100, np.sqrt(N))
+        taus = np.arange(Tplus1).reshape(1, -1) * eps_coupled[coupling[:, 0]].reshape(-1, 1)  # (N//2, T+1) Integration times corresponding to coupled particles
         avg_contraction, tau_bins = binned_average(contractivity, taus, n_bins)  # (n_bins, ), (n_bins, )
-        tau_min_contraction = tau_bins[np.nanargmin(avg_contraction)]  # tau corresponding to the minimum average contraction
-        median_eps_bottom = np.quantile(eps_coupled[coupling[:, 0]][bottom_i], q=0.5)  # median epsilon corresponding to tail of contraction distribution
-        bottom_taus_median = np.quantile(bottom_taus, q=0.5)  # median of taus corresponding to tail of contraction distribution
+        argmin_avg_contraction = np.nanargmin(avg_contraction)
+        tau_min_contraction = 0.5*(tau_bins[argmin_avg_contraction - 1] + tau_bins[argmin_avg_contraction])  # tau corresponding to the minimum average contraction
+
+        # median_eps_bottom = np.quantile(eps_coupled[coupling[:, 0]][bottom_i], q=0.5)  # median epsilon corresponding to tail of contraction distribution
+        # bottom_taus_median = np.quantile(bottom_taus, q=0.5)  # median of taus corresponding to tail of contraction distribution
+        # bottom_T_median = np.ceil(bottom_taus_median / median_eps_bottom)  # T found by dividing median tau in the bottom of contractivities by the median epsilon in the bottom of contractivities
 
         # Compute the new T as the tau corresponding to the average min contraction divided by the median step size among particles in the tail of the contraction distribution
-        T_optimal = np.ceil(tau_min_contraction/median_eps_bottom).astype(int)
+        denominator = np.quantile(epsilons, q=0.5)  # eps_params[eps_params['param_for_T_adaptation']]  #np.quantile(epsilons, q=0.5)#eps_params['mode_func'](eps_params) if "mode_func" in eps_params else eps_params[eps_params['param_for_T_adaptation']]
+        T_optimal = np.ceil(tau_min_contraction/denominator).astype(int)  # np.ceil(bottom_taus_median/median_eps_bottom).astype(int)  # np.ceil(bottom_taus_median/median_eps_bottom).astype(int)  # np.ceil(tau_min_contraction/median_eps_bottom).astype(int)
 
         if plot_contractivity:
-            fig, ax = plt.subplots(ncols=3, figsize=(12, 4))
+            fig, ax = plt.subplots(ncols=2, figsize=(8, 4), sharex=True, sharey=True)
             # Subplot 1: contractivity as a function of tau
             ax[0].plot(taus.T, contractivity.T, color='lightcoral', alpha=0.5)
-            ax[0].plot(tau_bins, avg_contraction, color='black')
-            ax[0].axvline(tau_min_contraction, color='navy', ls='--', label=f'Min-Contractivity Tau {tau_min_contraction: .3f}')
-            ax[0].set_xlabel("Tau")
-            ax[0].set_ylabel("Contractivity")
+            ax[0].plot(tau_bins, avg_contraction, color='black', label='Binned Average', lw=1)
+            ax[0].axvline(tau_min_contraction, color='dodgerblue', ls='--', label=r'$\mathregular{\tau_{n-1}^*}$')
+            # ax[0].axvline(bottom_taus_median, color='brown', ls='--', label="Median Tau Bottom")
+            ax[0].set_xlabel(r"$\mathregular{\tau}$", fontsize=13)
+            ax[0].set_ylabel("Contractivity", fontsize=13)
+            # ax[0].set_title(f"{np.quantile(contractivity[bottom_contractivity_flag], q=0.5)}")
             ax[0].legend()
-            # Subplot 2: 2D histogram of epsilon and k corresponding to tail of contractivity distribution
-            ax[1].hist2d(eps_coupled[coupling[:, 0]][bottom_i], bottom_k, bins=30)
-            ax[1].set_xlabel(r"$\mathregular{\epsilon}$")
-            ax[1].set_ylabel(r"$\mathregular{k}$")
-            ax[1].set_title(f"Median eps {median_eps_bottom: .4f}, Resulting T {T_optimal}")
+            ax[0].grid(True, color='gainsboro')
+            # Subplot 2: 2D Histogram of contractivity curves
+            ax[1].hist2d(taus.ravel(), contractivity.ravel(), bins=100)
+            ax[1].set_xlabel(r"$\mathregular{\tau}$", fontsize=13)
+            # ax[1].set_ylabel("Contractivity", fontsize=13)
+            # Subplot 3: 2D histogram of epsilon and k corresponding to tail of contractivity distribution
+            # ax[2].hist2d(eps_coupled[coupling[:, 0]][bottom_i], bottom_k, bins=30)
+            # ax[2].set_xlabel(r"$\mathregular{\epsilon}$")
+            # ax[2].set_ylabel(r"$\mathregular{k}$")
+            # ax[2].set_title(f"Median eps {median_eps_bottom: .4f}, Resulting T {T_optimal}")
             # Subplot 2: Histogram of bottom taus
-            _ = ax[2].hist(bottom_taus, bins=Tplus1)
-            ax[2].axvline(bottom_taus_median, label=f'Median {bottom_taus_median: .3f}', ls='--', lw=2, color='black', zorder=1)
-            ax[2].set_xlabel("Taus")
-            ax[2].set_ylabel("Counts")
-            ax[2].legend()
-            ax[2].set_title(f"Taus for bottom {bottom_quantile_val} contractivity quantile", fontsize=10)
-            fig.suptitle(f"T {T} epsilon mean {epsilons.mean(): .4f}")
+            # _ = ax[2].hist(bottom_taus, bins=Tplus1)
+            # ax[2].axvline(bottom_taus_median, label=f'Median {bottom_taus_median: .3f}', ls='--', lw=2, color='black', zorder=1)
+            # ax[2].set_xlabel("Taus")
+            # ax[2].set_ylabel("Counts")
+            # ax[2].legend()
+            # ax[2].set_title(f"Taus for bottom {bottom_quantile_val} contractivity quantile", fontsize=10)
+            # fig.suptitle(f"T {T} epsilon mean {epsilons.mean(): .4f}")
+            if save_contractivity_fig:
+                plt.savefig(contractivity_save_path + f"{n}_{seed}.png")
             plt.tight_layout()
             plt.show()
         T = max(min(T_max, T_optimal), T_min)
+        # T = max(min(T_max, T_optimal), T_min)
     return T, coupling_found
 
 
