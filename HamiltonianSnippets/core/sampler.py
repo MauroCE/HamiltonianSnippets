@@ -39,16 +39,20 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     :type T: int
     :param ESSrmin: Target Proportion of `N` as ESS when finding the next tempering parameter
     :type ESSrmin: float
-    :param sample_prior: Function to sample from the prior, should take `N` and `rng` as arguments and return an array
+    :param sample_prior: Function to sample from the prior, should take `N` and `rng` as arguments 
+                         and return an array
     :type sample_prior: callable
-    :param compute_likelihoods_priors_gradients: Function that takes positions of shape `(N, T+1, d)` as input and
-                                                 computes the negative log-likelihood, its gradient, the negative
-                                                 log prior and its gradient at these positions
+    :param compute_likelihoods_priors_gradients: Function that takes positions shaped `(N, T+1, d)` 
+                                                 as input and computes the negative log-likelihood, 
+                                                 its gradient, the negative log prior and its 
+                                                 gradient at these positions
     :type compute_likelihoods_priors_gradients: callable
-    :param epsilon_params: Parameters for the distribution of the epsilons. Should be a dictionary containing
-                           'distribution' which should be one of `['inv_gauss']` and parameters for them
+    :param epsilon_params: Parameters for the distribution of the epsilons. Should be a dictionary 
+                           containing 'distribution' which should be one of 
+                           `['inv_gauss', 'discrete_uniform']` and parameters for them
     :type epsilon_params: dict
-    :param act_on_overflow: Whether to use contingency measures in epsilon_params['on_overflow'] when overflow found
+    :param act_on_overflow: Whether to use contingency measures in epsilon_params['on_overflow'] 
+                            when overflow found
     :type act_on_overflow: bool
     :param adapt_step_size: Whether to adapt the leapfrog step size
     :type adapt_step_size: bool
@@ -70,7 +74,8 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     :type max_contractivity: int
     :param max_tries_find_coupling: Number of maximum tries used to try to find a coupling
     :type max_tries_find_coupling: int
-    :param variables_to_track: List of variables that we wish to track across iterations, by default it is None
+    :param variables_to_track: List of variables that we wish to track across iterations, by default 
+                               it is None
     :type variables_to_track: list
     :param bottom_quantile_val: Quantile value defining the bottom of contractivity
     :type bottom_quantile_val: float
@@ -89,11 +94,15 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     assert isinstance(T, int) and T >= 1, "Number of integration steps must be a positive integer."
     assert T_max >= T_min, "Maximum number of integration steps must be larger than minimum number."
     assert max_tries_find_coupling > 1, "Maximum number of tries to find a coupling must be >= 1."
-    assert (not save_contractivity_fig and contractivity_save_path is None) or (save_contractivity_fig and contractivity_save_path is not None), "When save_contractivity_fig is True, you must provide a valid path to save the figures to."
+    assert ((not save_contractivity_fig and contractivity_save_path is None) or
+            (save_contractivity_fig and contractivity_save_path is not None)), \
+            "When save_contractivity_fig is True, you must provide a valid path to save the " \
+            "figures to."
 
     # Set up time-keeping, random number generation, printing, iterations, mass_matrix and more
     start_time = time.time()
-    rng = np.random.default_rng(seed=seed if seed is not None else np.random.randint(low=0, high=10000000))
+    rng = np.random.default_rng(seed=seed if seed is not None else 
+                                np.random.randint(low=0, high=10000000))
     verboseprint = print if verbose else lambda *a, **kwargs: None
     mass_params = process_mass_params(mass_params)
     n = 1
@@ -108,7 +117,10 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
 
     # Storage
     epsilon_history = [epsilons]
-    epsilon_params_history = [{key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow", "mode_func"]}]  # parameters for the epsilon distribution
+    unpickable = ["params_to_estimate", "on_overflow", "mode_func"]
+    epsilon_params_history = [
+        {key: value for key, value in epsilon_params.items() if key not in unpickable}
+    ]  # parameters for the epsilon distribution
     gammas = [0.0]
     ess_history = [N]
     logLt = 0.0
@@ -117,7 +129,9 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
 
     # Store/track variables
     trackable_vars = {'epsilons': epsilons}
-    storage = {var: [trackable_vars[var]] for var in variables_to_track} if variables_to_track is not None else dict()
+    storage = {
+        var: [trackable_vars[var]] for var in variables_to_track
+    } if variables_to_track is not None else {}
 
     while gammas[n-1] < 1.0:
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .5f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]}")
@@ -198,7 +212,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
 
         # Storage
         epsilon_history.append(epsilons)
-        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key not in ["params_to_estimate", "on_overflow", "mode_func"]})
+        epsilon_params_history.append({key: value for key, value in epsilon_params.items() if key not in unpickable})
         ess_history.append(ess)
         T_history.append(T)
         trackable_vars.update({'epsilons': epsilons})
