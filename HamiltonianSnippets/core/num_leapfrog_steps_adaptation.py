@@ -129,10 +129,10 @@ def adapt_num_leapfrog_steps_contractivity(
             ax[0].legend()
             ax[0].grid(True, color='gainsboro')
             # Subplot 2: 2D Histogram of contractivity curves
-            ax[1].hist2d(taus.ravel(), contractivity.ravel(), bins=100)
+            ax[1].hist2d(taus.ravel(), contractivity.ravel(), bins=80, cmap="Reds")
             ax[1].set_xlabel(r"$\mathregular{\tau}$", fontsize=13)
             if save_contractivity_fig:
-                plt.savefig(contractivity_save_path + f"{n}_{seed}.png")
+                plt.savefig(contractivity_save_path + f"{n}_{seed}_red_colormap.png")
             plt.tight_layout()
             plt.show()
         T = max(min(T_max, T_optimal), T_min)

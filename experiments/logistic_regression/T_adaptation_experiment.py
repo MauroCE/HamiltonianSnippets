@@ -47,9 +47,9 @@ if __name__ == "__main__":
     compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function(_y=y, _Z=Z, _scales=scales)
 
     n_runs = 20
-    overall_seed = np.random.randint(low=0, high=10000000000)
+    overall_seed = 9344951554 # np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = np.array(np.geomspace(start=0.001, stop=10.0, num=9, endpoint=True))  # np.array() used only for pylint
+    step_sizes = [0.1]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9, endpoint=True))  # np.array() used only for pylint
 
     # Settings
     N = 500
@@ -58,13 +58,13 @@ if __name__ == "__main__":
     aoo = False  # whether to act on overflow
     skipo = False  # skip overflown trajectories in epsilon computation
     verbose = False
-    plot_contractivity = False
+    plot_contractivity = True  # False
     plot_Q_criterion = False
     adapt_T = True
     adapt_epsilon = True
     adapt_mass = False
-    save_contractivity_fig = False
-    contractivity_save_path = None  # "results/contractivity_figures/"
+    save_contractivity_fig = True  # False
+    contractivity_save_path = "results_storage/contractivity_figures/"  # None
     T_max = T
     T_min = 2
     max_contractivity = 1.5
@@ -125,5 +125,5 @@ if __name__ == "__main__":
             res.update({'logLt': out['logLt'], 'out': out})
             results.append(res)
 
-    with open(f"results_storage/new_adaptT_sonar_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}_minT{T_min}.pkl", "wb") as file:
+    with open(f"results_storage/Red_colormap_new_adaptT_sonar_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}_minT{T_min}.pkl", "wb") as file:
         pickle.dump(results, file)
