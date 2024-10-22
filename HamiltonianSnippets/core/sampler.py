@@ -9,7 +9,7 @@ from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .mass_matrix_adaptation import update_mass_matrix
-from .utils import next_annealing_param
+from HamiltonianSnippets.utils.utils import next_annealing_param
 from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps_contractivity
 
 

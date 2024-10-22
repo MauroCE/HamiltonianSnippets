@@ -2,9 +2,7 @@
 We use a uniform discrete distribution.
 """
 import numpy as np
-from HamiltonianSnippets.sampler import hamiltonian_snippet
-from HamiltonianSnippets.utils import eps_to_str
-import pickle
+from HamiltonianSnippets.core.sampler import hamiltonian_snippet
 import os
 
 

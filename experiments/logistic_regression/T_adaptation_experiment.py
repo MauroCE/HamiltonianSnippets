@@ -1,12 +1,9 @@
+"""Aim: adapt gamma, epsilon and T."""
 import os
 import numpy as np
-from HamiltonianSnippets.sampler import hamiltonian_snippet
-from HamiltonianSnippets.utils import eps_to_str
+from HamiltonianSnippets.core.sampler import hamiltonian_snippet
+from HamiltonianSnippets.utils.utils import eps_to_str
 import pickle
-import pandas as pd
-import scipy as sp
-from copy import deepcopy
-import math
 
 
 def generate_nlp_gnlp_nll_and_gnll_function(_y, _Z, _scales):
@@ -18,11 +15,9 @@ def generate_nlp_gnlp_nll_and_gnll_function(_y, _Z, _scales):
     """
     def nlp_gnlp_nll_and_gnll(x):
         nlp = np.full(fill_value=np.inf, shape=x.shape[0])  # (N, )
-        nll = np.full(fill_value=np.inf, shape=x.shape[0])  # (N, )
 
         # Negative log prior
         nlp_flag = np.any(x < np.sqrt(np.finfo(np.float64).max) * _scales.max(), axis=1)
-        # nlp[nlp_flag] = 0.5*61*np.log(2*np.pi) + 0.5*np.log(400.*(25.0**60)) + 0.5*np.sum((x[nlp_flag] / _scales)**2, axis=1)
         nlp[nlp_flag] = 0.5*61*np.log(2*np.pi) + 0.5*np.log(400) + 0.5*60.0*np.log(25.0) + 0.5*np.sum((x[nlp_flag] / _scales)**2, axis=1)
         gnlp = x / (_scales**2)
         # Here I use D for the number of data points (n_d)
@@ -130,5 +125,5 @@ if __name__ == "__main__":
             res.update({'logLt': out['logLt'], 'out': out})
             results.append(res)
 
-    with open(f"results/new_adaptT_sonar_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}_minT{T_min}.pkl", "wb") as file:
+    with open(f"results_storage/new_adaptT_sonar_seed{overall_seed}_N{N}_T{T}_massFalse_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}_aoo{aoo}_skipo{skipo}_minT{T_min}.pkl", "wb") as file:
         pickle.dump(results, file)

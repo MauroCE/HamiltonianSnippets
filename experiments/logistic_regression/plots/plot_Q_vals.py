@@ -5,7 +5,7 @@ import numpy as np
 import pickle
 rc('font', **{'family': 'STIXGeneral'})
 
-with open("results/Qvals_seed3729307047_N2500_T30_runs1.pkl", "rb") as file:
+with open("../results_storage/Qvals_seed3729307047_N2500_T30_runs1.pkl", "rb") as file:
     results = pickle.load(file)
 
 Q_vals_history = results[0]['out']['Q_vals_history']

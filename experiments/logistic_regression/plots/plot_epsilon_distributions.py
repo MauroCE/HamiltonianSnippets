@@ -6,7 +6,7 @@ import pickle
 import matplotlib.patches as mpatches
 rc('font', **{'family': 'STIXGeneral'})
 
-with open("results/store_newrun_seed9731864855_N500_T30_runs20_from1e-06_to1000dot0_skewness3.pkl", "rb") as file:
+with open("../results_storage/store_newrun_seed9731864855_N500_T30_runs20_from1e-06_to1000dot0_skewness3.pkl", "rb") as file:
     results = pickle.load(file)
 
 initial_epsilons = [0.0000001, 0.001, 10.0, 1000.0]

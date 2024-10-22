@@ -4,7 +4,8 @@ import numpy as np
 from matplotlib import rc
 rc('font', **{'family': 'STIXGeneral'})
 
-with open("results/adaptT_Tmax80_T80_seed5095905818_N500_T80_massFalse_runs20_from0dot001_to10dot0_skewness3.pkl", "rb") as file:
+with open(
+        "../results_storage/adaptT_Tmax80_T80_seed5095905818_N500_T80_massFalse_runs20_from0dot001_to10dot0_skewness3.pkl", "rb") as file:
     results = pickle.load(file)
 
 n_runs = 20

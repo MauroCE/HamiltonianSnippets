@@ -5,7 +5,7 @@ import pickle
 rc('font', **{'family': 'STIXGeneral'})
 
 # Load results, this is a list of dictionaries
-with open("results/seed1841913736_N500_T30_massFalse_runs20_from0dot001_to10dot0_skewness3.pkl", "rb") as file:
+with open("../results_storage/seed1841913736_N500_T30_massFalse_runs20_from0dot001_to10dot0_skewness3.pkl", "rb") as file:
     results = pickle.load(file)
 
 n_runs = 20

@@ -1,9 +1,10 @@
-"""Only difference is that we now store epsilons for 4 initial epsilons."""
-"""Literally the same as before, but just for safety I run it with the new version that uses the n-1 weights and
-that uses the mass_params."""
+"""Aim of experiment: run Hamiltonian Snippet from 4 different epsilons across 9 orders of magnitude, and store the
+empirical distribution of the epsilons across iterations. We only perform adaptation on gamma and epsilon, but not on T.
+This will be used to produce a plot where on the y-axis we have the box-plots of the empirical epsilon distribution,
+and on the x-axis we have the iteration number."""
 import numpy as np
-from HamiltonianSnippets.sampler import hamiltonian_snippet
-from HamiltonianSnippets.utils import eps_to_str
+from HamiltonianSnippets.core.sampler import hamiltonian_snippet
+from HamiltonianSnippets.utils.utils import eps_to_str
 import pickle
 import os
 
@@ -49,7 +50,7 @@ if __name__ == "__main__":
     n_runs = 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = [1e-6, 1e-3, 10, 1000]#np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
+    step_sizes = [1e-6, 1e-3, 10, 1000]
     N = 500
     T = 30
     skewness = 3  # a large skewness helps avoiding a large bias
@@ -106,6 +107,5 @@ if __name__ == "__main__":
             results.append(res)
 
     # Save results
-    with open(f"results/store_newrun_seed{overall_seed}_N{N}_T{T}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
+    with open(f"results_storage/store_newrun_seed{overall_seed}_N{N}_T{T}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
         pickle.dump(results, file)
-

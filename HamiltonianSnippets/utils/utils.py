@@ -1,6 +1,6 @@
-from scipy.optimize import brentq
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import brentq
 
 
 def ess_from_log_weights(logw: NDArray) -> float:

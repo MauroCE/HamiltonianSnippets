@@ -1,11 +1,7 @@
-import os
 import numpy as np
-from HamiltonianSnippets.sampler import hamiltonian_snippet
-from HamiltonianSnippets.utils import eps_to_str
-import pickle
+from HamiltonianSnippets.core.sampler import hamiltonian_snippet
 import pandas as pd
 from numba import jit
-import scipy as sp
 from copy import deepcopy
 
 

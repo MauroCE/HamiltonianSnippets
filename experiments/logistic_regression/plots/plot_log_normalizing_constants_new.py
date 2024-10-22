@@ -5,10 +5,11 @@ import pickle
 rc('font', **{'family': 'STIXGeneral'})
 
 # Load results, this is a list of dictionaries
-with open("results/newrun_seed4931862540_N500_T30_runs20_from0dot001_to10dot0_skewness3.pkl", "rb") as file:
+with open("../results_storage/newrun_seed4931862540_N500_T30_runs20_from0dot001_to10dot0_skewness3.pkl", "rb") as file:
     results_adapt = pickle.load(file)
 
-with open("../../../IntegratorSnippetsExperiments_FromWorkPC/results/abg/results_N500_T30_from0dot001_to10_runs20.pkl", "rb") as file:
+with open(
+        "../../../../IntegratorSnippetsExperiments_FromWorkPC/results/abg/results_N500_T30_from0dot001_to10_runs20.pkl", "rb") as file:
     results_fixed = pickle.load(file)
 
 n_runs = 20

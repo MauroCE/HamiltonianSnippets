@@ -4,7 +4,8 @@ import numpy as np
 from matplotlib import rc
 rc('font', **{'family': 'STIXGeneral'})
 
-with open("results/new_adaptT_sonar_seed5216451320_N500_T80_massFalse_runs20_from0dot001_to10dot0_skewness3_aooFalse_skipoFalse_minT2.pkl", "rb") as file:
+with open(
+        "../results_storage/new_adaptT_sonar_seed5216451320_N500_T80_massFalse_runs20_from0dot001_to10dot0_skewness3_aooFalse_skipoFalse_minT2.pkl", "rb") as file:
     results = pickle.load(file)
 
 # edit results since one of them was none

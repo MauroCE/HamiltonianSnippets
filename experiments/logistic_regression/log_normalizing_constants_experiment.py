@@ -1,8 +1,9 @@
-"""Literally the same as before, but just for safety I run it with the new version that uses the n-1 weights and
-that uses the mass_params."""
+"""Aim of Experiment: Run Hamiltonian Snippet for various different epsilons, performing adaptation only on gamma and
+epsilon, and storing the log-normalizing constants. The aim will be to run this with and without epsilon adaptation and
+then to create boxplots for the log-normalizing constants for the various different initial epsilons."""
 import numpy as np
-from HamiltonianSnippets.sampler import hamiltonian_snippet
-from HamiltonianSnippets.utils import eps_to_str
+from HamiltonianSnippets.core.sampler import hamiltonian_snippet
+from HamiltonianSnippets.utils.utils import eps_to_str
 import pickle
 import os
 
@@ -104,5 +105,5 @@ if __name__ == "__main__":
             results.append(res)
 
     # Save results
-    with open(f"results/newrun_seed{overall_seed}_N{N}_T{T}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
-        pickle.dump(results, file)
+    # with open(f"results_storage/newrun_seed{overall_seed}_N{N}_T{T}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
+    #     pickle.dump(results, file)

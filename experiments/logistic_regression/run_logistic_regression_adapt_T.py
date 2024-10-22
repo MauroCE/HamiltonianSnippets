@@ -1,6 +1,6 @@
 import numpy as np
-from HamiltonianSnippets.sampler import hamiltonian_snippet
-from HamiltonianSnippets.utils import eps_to_str
+from HamiltonianSnippets.core.sampler import hamiltonian_snippet
+from HamiltonianSnippets.utils.utils import eps_to_str
 import pickle
 import os
 
@@ -100,5 +100,6 @@ if __name__ == "__main__":
             res.update({'logLt': out['logLt'], 'out': out})
             results.append(res)
 
-    with open(f"results/adaptT_Tmax{T_max}_T{T}_seed{overall_seed}_N{N}_T{T}_mass{mass_matrix_adaptation}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
+    with open(
+            f"results_storage/adaptT_Tmax{T_max}_T{T}_seed{overall_seed}_N{N}_T{T}_mass{mass_matrix_adaptation}_runs{n_runs}_from{eps_to_str(min(step_sizes))}_to{eps_to_str(max(step_sizes))}_skewness{skewness}.pkl", "wb") as file:
         pickle.dump(results, file)
