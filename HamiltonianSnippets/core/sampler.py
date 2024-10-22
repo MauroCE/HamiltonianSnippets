@@ -1,15 +1,17 @@
+"""Hamiltonian Snippets Sampler."""
 import time
-import numpy as np
+from copy import deepcopy
 from typing import Optional
+import numpy as np
 from scipy.special import logsumexp
 from numpy.typing import NDArray
-from copy import deepcopy
+
+from HamiltonianSnippets.utils.utils import next_annealing_param
 
 from .leapfrog_integration import leapfrog
 from .weight_computations import compute_weights
 from .step_size_adaptation import sample_epsilons, estimate_with_cond_variance
 from .mass_matrix_adaptation import update_mass_matrix
-from HamiltonianSnippets.utils.utils import next_annealing_param
 from .num_leapfrog_steps_adaptation import adapt_num_leapfrog_steps_contractivity
 
 
@@ -35,7 +37,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
     :type N: int
     :param T: Number of integration steps
     :type T: int
-    :param ESSrmin: Proportion of `N` that we target as our ESS when finding the next tempering parameter
+    :param ESSrmin: Target Proportion of `N` as ESS when finding the next tempering parameter
     :type ESSrmin: float
     :param sample_prior: Function to sample from the prior, should take `N` and `rng` as arguments and return an array
     :type sample_prior: callable
