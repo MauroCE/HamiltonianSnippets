@@ -53,7 +53,7 @@ def estimate_with_cond_variance(xnk: NDArray, logw_criterion: NDArray, epsilons:
         Q = np.sum((np.exp(logw_criterion - logsumexp(logw_criterion))*norms**2).reshape(N, Tplus1), axis=1)  # (N, )
         sort_ix = np.argsort(epsilons)
         fig, ax = plt.subplots()
-        ax.plot(epsilons[sort_ix], Q[sort_ix] , marker='o', color='lightcoral', markeredgecolor='firebrick', lw=2, label=r"$\mathregular{\mathcal{Q}}$")
+        ax.plot(epsilons[sort_ix], Q[sort_ix], marker='o', color='lightcoral', markeredgecolor='firebrick', lw=2, label=r"$\mathregular{\mathcal{Q}}$")
         ax.set_xscale('log')
         ax.set_yscale('log')
         ax.legend()

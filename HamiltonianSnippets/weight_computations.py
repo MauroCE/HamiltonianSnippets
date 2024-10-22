@@ -45,7 +45,6 @@ def compute_weights(
 
     # First part is True when corresponding xnk or vnk is inf due to overflow
     # Second part is True when squaring vnk leads to overflow
-    # max_invmass = inv_mass_diag_next.max()  # maximum of the inverse mass diagonal
     ofm = overflow_mask.ravel() | np.any(np.abs(vnk.reshape(-1, d)) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N*(T+1), )
     # same mask but only for seed particles
     ofm_seed = overflow_mask[:, 0].ravel() | np.any(np.abs(vnk[:, 0]) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N, )

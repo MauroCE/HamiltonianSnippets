@@ -9,7 +9,7 @@ rc('font', **{'family': 'STIXGeneral'})
 
 def adapt_num_leapfrog_steps_contractivity(
         xnk: NDArray, vnk: NDArray, epsilons: NDArray, nlps: NDArray, nlls: NDArray, T: int,
-        gamma: float, mass_params: dict, eps_params: dict, compute_likelihoods_priors_gradients: callable,
+        gamma: float, mass_params: dict, compute_likelihoods_priors_gradients: callable,
         rng: np.random.Generator, max_tries: int = 100, plot_contractivity: bool = False, T_max: int = 100,
         T_min: int = 5, max_contractivity: float = 3, bottom_quantile_val: float = 0.05,
         save_contractivity_fig: bool = False, contractivity_save_path: Optional[str] = None,
@@ -34,8 +34,6 @@ def adapt_num_leapfrog_steps_contractivity(
     :type gamma: float
     :param mass_params: Mass matrix parameters
     :type mass_params: dict
-    :param eps_params: Epsilon params
-    :type eps_params: dict
     :param compute_likelihoods_priors_gradients: Function computing nlps, gnlps, nlls, gnlls
     :type compute_likelihoods_priors_gradients: callable
     :param rng: Random number generator for reproducibility
@@ -108,13 +106,6 @@ def adapt_num_leapfrog_steps_contractivity(
         contractivity /= contractivity[:, 0].reshape(-1, 1)
         contractivity = np.clip(contractivity, a_min=None, a_max=max_contractivity)  # to avoid coupled particles diverging too much
 
-        # Find left tail of contractivity distribution
-        bottom_contractivity_flag = contractivity <= np.quantile(contractivity, q=bottom_quantile_val)
-
-        # Find the i-indices and k-indices corresponding to tail contraction
-        bottom_i, bottom_k = np.where(bottom_contractivity_flag)
-        bottom_taus = eps_coupled[coupling[:, 0]][bottom_i] * bottom_k  # corresponding integration times
-
         # Compute a binned average of the contractivity as a function of tau
         n_bins = max(100, np.sqrt(N))
         taus = np.arange(Tplus1).reshape(1, -1) * eps_coupled[coupling[:, 0]].reshape(-1, 1)  # (N//2, T+1) Integration times corresponding to coupled particles
@@ -122,13 +113,10 @@ def adapt_num_leapfrog_steps_contractivity(
         argmin_avg_contraction = np.nanargmin(avg_contraction)
         tau_min_contraction = 0.5*(tau_bins[argmin_avg_contraction - 1] + tau_bins[argmin_avg_contraction])  # tau corresponding to the minimum average contraction
 
-        # median_eps_bottom = np.quantile(eps_coupled[coupling[:, 0]][bottom_i], q=0.5)  # median epsilon corresponding to tail of contraction distribution
-        # bottom_taus_median = np.quantile(bottom_taus, q=0.5)  # median of taus corresponding to tail of contraction distribution
-        # bottom_T_median = np.ceil(bottom_taus_median / median_eps_bottom)  # T found by dividing median tau in the bottom of contractivities by the median epsilon in the bottom of contractivities
-
-        # Compute the new T as the tau corresponding to the average min contraction divided by the median step size among particles in the tail of the contraction distribution
-        denominator = np.quantile(epsilons, q=0.5)  # eps_params[eps_params['param_for_T_adaptation']]  #np.quantile(epsilons, q=0.5)#eps_params['mode_func'](eps_params) if "mode_func" in eps_params else eps_params[eps_params['param_for_T_adaptation']]
-        T_optimal = np.ceil(tau_min_contraction/denominator).astype(int)  # np.ceil(bottom_taus_median/median_eps_bottom).astype(int)  # np.ceil(bottom_taus_median/median_eps_bottom).astype(int)  # np.ceil(tau_min_contraction/median_eps_bottom).astype(int)
+        # Compute the new T as the tau corresponding to the average min contraction divided by the median step size
+        # among particles in the tail of the contraction distribution
+        denominator = np.quantile(epsilons, q=0.5)
+        T_optimal = np.ceil(tau_min_contraction/denominator).astype(int)
 
         if plot_contractivity:
             fig, ax = plt.subplots(ncols=2, figsize=(8, 4), sharex=True, sharey=True)
@@ -136,35 +124,18 @@ def adapt_num_leapfrog_steps_contractivity(
             ax[0].plot(taus.T, contractivity.T, color='lightcoral', alpha=0.5)
             ax[0].plot(tau_bins, avg_contraction, color='black', label='Binned Average', lw=1)
             ax[0].axvline(tau_min_contraction, color='dodgerblue', ls='--', label=r'$\mathregular{\tau_{n-1}^*}$')
-            # ax[0].axvline(bottom_taus_median, color='brown', ls='--', label="Median Tau Bottom")
             ax[0].set_xlabel(r"$\mathregular{\tau}$", fontsize=13)
             ax[0].set_ylabel("Contractivity", fontsize=13)
-            # ax[0].set_title(f"{np.quantile(contractivity[bottom_contractivity_flag], q=0.5)}")
             ax[0].legend()
             ax[0].grid(True, color='gainsboro')
             # Subplot 2: 2D Histogram of contractivity curves
             ax[1].hist2d(taus.ravel(), contractivity.ravel(), bins=100)
             ax[1].set_xlabel(r"$\mathregular{\tau}$", fontsize=13)
-            # ax[1].set_ylabel("Contractivity", fontsize=13)
-            # Subplot 3: 2D histogram of epsilon and k corresponding to tail of contractivity distribution
-            # ax[2].hist2d(eps_coupled[coupling[:, 0]][bottom_i], bottom_k, bins=30)
-            # ax[2].set_xlabel(r"$\mathregular{\epsilon}$")
-            # ax[2].set_ylabel(r"$\mathregular{k}$")
-            # ax[2].set_title(f"Median eps {median_eps_bottom: .4f}, Resulting T {T_optimal}")
-            # Subplot 2: Histogram of bottom taus
-            # _ = ax[2].hist(bottom_taus, bins=Tplus1)
-            # ax[2].axvline(bottom_taus_median, label=f'Median {bottom_taus_median: .3f}', ls='--', lw=2, color='black', zorder=1)
-            # ax[2].set_xlabel("Taus")
-            # ax[2].set_ylabel("Counts")
-            # ax[2].legend()
-            # ax[2].set_title(f"Taus for bottom {bottom_quantile_val} contractivity quantile", fontsize=10)
-            # fig.suptitle(f"T {T} epsilon mean {epsilons.mean(): .4f}")
             if save_contractivity_fig:
                 plt.savefig(contractivity_save_path + f"{n}_{seed}.png")
             plt.tight_layout()
             plt.show()
         T = max(min(T_max, T_optimal), T_min)
-        # T = max(min(T_max, T_optimal), T_min)
     return T, coupling_found
 
 

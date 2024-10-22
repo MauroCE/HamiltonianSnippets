@@ -163,9 +163,8 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         verboseprint(f"\tLogLt {logLt}")
 
         # Step size adaptation
-        # TODO: make sure xnk[overflow_mask] = 0.0 is not fucking up T adaptation
         if adapt_step_size:
-            xnk_for_eps_adaptation = deepcopy(xnk)
+            xnk_for_eps_adaptation = deepcopy(xnk)  # Deepcopy to avoid overwriting xnk and affecting T adaptation
             xnk_for_eps_adaptation[overflow_mask] = 0.0
             epsilon_params.update(estimate_with_cond_variance(
                 xnk=xnk_for_eps_adaptation, logw_criterion=logw_criterion, epsilons=epsilons, epsilon_params=epsilon_params,
@@ -178,8 +177,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         if adapt_n_leapfrog_steps:
             T, coupling_found = adapt_num_leapfrog_steps_contractivity(
                 xnk=xnk, vnk=vnk, epsilons=epsilons, nlps=nlps, nlls=nlls, T=T, gamma=gammas[n-1],
-                mass_params=mass_params, eps_params=epsilon_params,
-                compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
+                mass_params=mass_params, compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
                 plot_contractivity=plot_contractivity, max_tries=max_tries_find_coupling, T_max=T_max, T_min=T_min,
                 max_contractivity=max_contractivity, bottom_quantile_val=bottom_quantile_val,
                 save_contractivity_fig=save_contractivity_fig, contractivity_save_path=contractivity_save_path,
@@ -193,7 +191,7 @@ def hamiltonian_snippet(N: int, T: int, ESSrmin: float, sample_prior: callable,
         mass_params = curr_mass_becomes_next_mass(mass_params)  # mass_diag_curr = mass_diag_next
 
         # Refresh velocities
-        v = sample_velocities(mass_params, N, d, rng)  # rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
+        v = sample_velocities(mass_params, N, d, rng)
         verboseprint("\tVelocities refreshed.")
 
         # Storage
