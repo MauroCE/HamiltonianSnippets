@@ -13,7 +13,7 @@ from scipy.stats import invgauss
 from scipy.optimize import brentq
 import matplotlib.pyplot as plt
 from matplotlib import rc
-import matplotlib.patches as mpatches
+# import matplotlib.patches as mpatches
 rc('font', **{'family': 'STIXGeneral'})
 
 
@@ -41,7 +41,7 @@ def generate_sample_prior_function(_scales):
     return lambda n, rng: _scales * rng.normal(loc=0.0, scale=1.0, size=(n, 61))
 
 
-def sample_epsilons(eps_params: dict, N: int, rng: np.random.Generator) -> NDArray:
+def sample_epsilons(eps_params: dict, n_grid: int, rng: np.random.Generator) -> NDArray:
     """Samples epsilons according to the correct distribution."""
     assert 'distribution' in eps_params, "Epsilon parameters must contain a key 'distribution'."
     match eps_params['distribution']:
@@ -50,42 +50,42 @@ def sample_epsilons(eps_params: dict, N: int, rng: np.random.Generator) -> NDArr
             assert eps_params['skewness'] > 0, "Skewness must be strictly positive for an inverse gaussian."
             assert eps_params['mean'] > 0, "Mean must be strictly positive for an inverse gaussian."
             lambda_param = 9*eps_params['mean'] / eps_params['skewness']**2  # since skewness = 3*sqrt(mu/lambda)
-            return invgauss.rvs(mu=eps_params['mean']/lambda_param, loc=0, scale=lambda_param, size=N, random_state=rng)
+            return invgauss.rvs(mu=eps_params['mean']/lambda_param, loc=0, scale=lambda_param, size=n_grid, random_state=rng)
 
         case 'discrete_uniform':
             assert len(eps_params['values']) > 0, "When using a discrete uniform distribution, there should be at least one value, one for each group."
             assert np.all(np.array(eps_params['values']) > 0), "Epsilon values must be positive for all groups when using a uniform discrete distribution."
-            return rng.choice(a=eps_params['values'], size=N, replace=True)
+            return rng.choice(a=eps_params['values'], size=n_grid, replace=True)
 
 
-def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likelihoods_priors_gradients):
+def leapfrog(x, v, n_leapfrog, epsilons, gamma_curr, inv_mass_diag_curr, _compute_likelihoods_priors_gradients):
     """Leapfrog integration """
-    N, d = x.shape
+    n_particles, d = x.shape
     if len(epsilons.shape) == 1:
         epsilons = epsilons[:, None]
     inv_mass_diag_curr = inv_mass_diag_curr[None, :]
 
     # Initialize snippets, negative log priors and negative log likelihoods
-    xnk = np.full((N, T+1, d), np.nan)
-    vnk = np.full((N, T+1, d), np.nan)
-    nlps = np.full((N, T+1), np.nan)  # negative log priors
-    nlls = np.full((N, T+1), np.nan)  # negative log likelihoods
+    xnk = np.full((n_particles, n_leapfrog + 1, d), np.nan)
+    vnk = np.full((n_particles, n_leapfrog + 1, d), np.nan)
+    nlps = np.full((n_particles, n_leapfrog + 1), np.nan)  # negative log priors
+    nlls = np.full((n_particles, n_leapfrog + 1), np.nan)  # negative log likelihoods
     xnk[:, 0] = x  # seed positions
     vnk[:, 0] = v  # seed velocities
 
     # First momentum half-step
-    nlps[:, 0], gnlps, nlls[:, 0], gnlls = compute_likelihoods_priors_gradients(x)
+    nlps[:, 0], gnlps, nlls[:, 0], gnlls = _compute_likelihoods_priors_gradients(x)
     v = v - 0.5*epsilons*(gnlps + gamma_curr*gnlls)  # (N, d)
 
     # T - 1 position and velocity full steps
-    for k in range(T-1):
+    for k in range(n_leapfrog - 1):
 
         # Full position step
         x = x + epsilons*(v * inv_mass_diag_curr)
 
         # Full momentum step
-        nlps[:, k+1], gnlps, nlls[:, k+1], gnlls = compute_likelihoods_priors_gradients(x)
-        v = v - epsilons*(gnlps + gamma_curr*gnlls)  # TODO: when gamma=0 and gnlls contain inf then 0*inf=nan
+        nlps[:, k+1], gnlps, nlls[:, k+1], gnlls = _compute_likelihoods_priors_gradients(x)
+        v = v - epsilons*(gnlps + gamma_curr*gnlls)
 
         # Store positions and velocities
         vnk[:, k+1] = v
@@ -95,7 +95,7 @@ def leapfrog(x, v, T, epsilons, gamma_curr, inv_mass_diag_curr, compute_likeliho
     x = x + epsilons*(v * inv_mass_diag_curr)
 
     # Final momentum half-step
-    nlps[:, -1], gnlps, nlls[:, -1], gnlls = compute_likelihoods_priors_gradients(x)
+    nlps[:, -1], gnlps, nlls[:, -1], gnlls = _compute_likelihoods_priors_gradients(x)
     v = v - 0.5*epsilons*(gnlps + gamma_curr*gnlls)
 
     # Store final position and velocity
@@ -134,11 +134,11 @@ def next_annealing_param(gamma: float, ESSrmin: float, llk) -> float:
     :return: New tempering parameter
     :rtype: float
     """
-    N = llk.shape[0]
+    n_particles = llk.shape[0]
 
     def f(e):
-        ess = ess_from_log_weights(e * llk) if e > 0.0 else N  # avoid 0 x inf issue when e==0
-        return ess - ESSrmin * N
+        ess = ess_from_log_weights(e * llk) if e > 0.0 else n_particles  # avoid 0 x inf issue when e==0
+        return ess - ESSrmin * n_particles
     if f(1. - gamma) < 0.:
         return gamma + brentq(f, 0.0, 1.0 - gamma)
     else:
@@ -182,22 +182,18 @@ def compute_weights(
     assert len(vnk.shape) == 3, "Velocities must be a 3-dimensional array."
     assert len(nlps.shape) == 2, "Negative log priors must be a 2-dimensional array."
     assert len(nlls.shape) == 2, "Negative log likelihoods must be a 2-dimensional array."
-    N, Tplus1, d = vnk.shape
-
-    # ofm = overflow_mask.ravel()  # (N*(T+1), ) boolean mask, True if corresponding xnk or vnk is inf due to overflow
-    # ofm_seed = overflow_mask[:, 0].ravel()  # (N, ) same mask but only for seed particles
+    n_particles, Tplus1, d = vnk.shape
 
     # First part is True when corresponding xnk or vnk is inf due to overflow
     # Second part is True when squaring vnk leads to overflow
-    max_invmass = inv_mass_diag_next.max()  # maximum of the inverse mass diagonal
     ofm = overflow_mask.ravel() | np.any(np.abs(vnk.reshape(-1, d)) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N*(T+1), )
     # same mask but only for seed particles
     ofm_seed = overflow_mask[:, 0].ravel() | np.any(np.abs(vnk[:, 0]) >= np.sqrt(np.finfo(np.float64).max), axis=1)  # (N, )
 
-    log_num = np.repeat(-np.inf, N*Tplus1)  # default to zero denominator
-    log_num_unfolded = np.repeat(-np.inf, N*Tplus1)
-    log_num_criterion = np.repeat(-np.inf, N*Tplus1)
-    log_den = np.repeat(np.nan, N)  # no overflown particle can ever become a seed
+    log_num = np.repeat(-np.inf, n_particles * Tplus1)  # default to zero denominator
+    log_num_unfolded = np.repeat(-np.inf, n_particles * Tplus1)
+    log_num_criterion = np.repeat(-np.inf, n_particles * Tplus1)
+    log_den = np.repeat(np.nan, n_particles)  # no overflown particle can ever become a seed
 
     # Log numerator of the unfolded weights
     log_num[~ofm] = (-nlps.ravel()[~ofm])  # + gamma_next*(-nlls.ravel()[~ofm])
@@ -213,11 +209,11 @@ def compute_weights(
     log_den[~ofm_seed] += 0.5*np.sum(np.log(inv_mass_diag_curr))
 
     # Unfolded weights
-    logw_unfolded = log_num_unfolded.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
+    logw_unfolded = log_num_unfolded.reshape(n_particles, Tplus1) - log_den[:, None]  # (N, T+1) log un-normalized unfolded weights
     W_unfolded = np.exp(logw_unfolded - logsumexp(logw_unfolded))  # (N, T+1) normalized unfolded weights
 
     # Log weights for the criterion
-    logw_criterion = log_num_criterion.reshape(N, Tplus1) - log_den[:, None]  # (N, T+1)
+    logw_criterion = log_num_criterion.reshape(n_particles, Tplus1) - log_den[:, None]  # (N, T+1)
 
     # Overflown should lead to zero weights
     if W_unfolded[overflow_mask].sum() != 0:
@@ -230,8 +226,7 @@ def compute_weights(
     return W_unfolded, logw_unfolded, W_folded, logw_folded, logw_criterion
 
 
-def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss: callable, skip_overflown: bool,
-                                overflow_mask: NDArray) -> Tuple:
+def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, ss: callable) -> Tuple:
     """Estimates a sufficient statistics using the conditional variance.
 
     Parameters
@@ -242,10 +237,8 @@ def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, 
     :type logw: np.ndarray
     :param epsilons: Step sizes, one for each snippet, has shape `(N, )`
     :type epsilons: np.ndarray
-    :param skip_overflown: Whether to skip the trajectories that had an epsilon that lead to overflow. Shape (N, )
-    :type skip_overflown: bool
-    :param overflow_mask: Mask determining if the snippet has encoutered an overflow error
-    :type overflow_mask: np.ndarray
+    :param ss: Sufficient statistics
+    :type ss: callable
     :return: Dictionary of estimates for each sufficient statistics
     :rtype: dict
     """
@@ -256,7 +249,7 @@ def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, 
     assert xnk.shape[:2] == logw.shape, "There must be a weight for each snippet position."
 
     # Weight computations are in common for all sufficient statistics
-    N, Tplus1 = logw.shape
+    n_particles, Tplus1 = logw.shape
     # ofm = overflow_mask if skip_overflown else np.zeros(N, dtype=bool)
     # Compute the discrete distribution mu(k | z, epsilon)
     # mu_k_given_z_eps = np.exp(logw[~ofm] - logsumexp(logw[~ofm], axis=1, keepdims=True))  # (N, T+1)
@@ -272,9 +265,9 @@ def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, 
     # Flag for when computation can be "logged"
     flag = (norms > 0) & (logw > -np.inf) & (T_hat_repeated != 0)  # (N, T+1) when computation is not zero
     # Initialize variables
-    log_sq_norms = np.full(fill_value=-np.inf, shape=(N, Tplus1))
-    logw_filtered = np.full(fill_value=-np.inf, shape=(N, Tplus1))
-    log_T_hat = np.full(fill_value=-np.inf, shape=(N, Tplus1))
+    log_sq_norms = np.full(fill_value=-np.inf, shape=(n_particles, Tplus1))
+    logw_filtered = np.full(fill_value=-np.inf, shape=(n_particles, Tplus1))
+    log_T_hat = np.full(fill_value=-np.inf, shape=(n_particles, Tplus1))
     # log of squared norms, computed only where computation is not zero
     log_sq_norms[flag] = 2*np.log(norms[flag])
     # Same for log weights and estimator
@@ -288,19 +281,19 @@ def estimate_with_cond_variance(xnk: NDArray, logw: NDArray, epsilons: NDArray, 
     return estimator, log_criterion, flag
 
 
-def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
+def hamiltonian_snippet(n_particles: int, n_leapfrog: int, mass_diag: NDArray, ESSrmin: float, sample_prior: callable,
                         compute_likelihoods_priors_gradients: callable, epsilon_params: dict,
                         act_on_overflow: bool = False, adapt_step_size: bool = False,
-                        skip_overflown: bool = False, adapt_mass: bool = False, verbose: bool = True,
+                        adapt_mass: bool = False, verbose: bool = True,
                         seed: Optional[int] = None):
     """Hamiltonian Snippets with Leapfrog integration and step size adaptation.
 
     Parameters
     ----------
-    :param N: Number of particles
-    :type N: int
-    :param T: Number of integration steps
-    :type T: int
+    :param n_particles: Number of particles
+    :type n_particles: int
+    :param n_leapfrog: Number of integration steps
+    :type n_leapfrog: int
     :param mass_diag: Diagonal of the mass matrix
     :type mass_diag: np.ndarray
     :param ESSrmin: Proportion of `N` that we target as our ESS when finding the next tempering parameter
@@ -318,8 +311,6 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :type act_on_overflow: bool
     :param adapt_step_size: Whether to adapt the leapfrog step size
     :type adapt_step_size: bool
-    :param skip_overflown: Whether to skip overflown trajectories when estimating epsilon
-    :type skip_overflown: bool
     :param adapt_mass: Whether to adapt the mass matrix diagonal or not
     :type adapt_mass: bool
     :param verbose: Whether to print progress of the algorithm
@@ -327,8 +318,8 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     :param seed: Seed for the random number generator
     :type seed: int or None
     """
-    assert isinstance(N, int) and N >= 1, "Number of particles must be a positive integer."
-    assert isinstance(T, int) and T >= 1, "Number of integration steps must be a positive integer."
+    assert isinstance(n_particles, int) and n_particles >= 1, "Number of particles must be a positive integer."
+    assert isinstance(n_leapfrog, int) and n_leapfrog >= 1, "Number of integration steps must be a positive integer."
 
     # Set up time-keeping, random number generation, printing, iterations, mass_matrix and more
     start_time = time.time()
@@ -337,32 +328,32 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
     n = 1
 
     # Initialize particles, epsilons
-    x = sample_prior(N, rng)
+    x = sample_prior(n_particles, rng)
     d = x.shape[1]
     mass_diag_curr = mass_diag if mass_diag is not None else np.eye(d)
-    v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
+    v = rng.normal(loc=0, scale=1, size=(n_particles, d)) * np.sqrt(mass_diag_curr)
 
     # Initial step sizes and mass matrix
-    epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
+    epsilons = sample_epsilons(eps_params=epsilon_params, n_grid=n_particles, rng=rng)
 
     # Storage
     epsilon_history = [epsilons]
     epsilon_params_history = [{key: value for key, value in epsilon_params.items() if type(value) != callable}]  # parameters for the epsilon distribution
     gammas = [0.0]
-    ess_history = [N]
+    ess_history = [n_particles]
     logLt = 0.0
 
     while gammas[n-1] < 1.0:
         verboseprint(f"Iteration {n} Gamma {gammas[n-1]: .5f} Epsilon {epsilon_params['to_print'].capitalize()}: {epsilon_params[epsilon_params['to_print']]}")
 
         # Construct trajectories
-        xnk, vnk, nlps, nlls = leapfrog(x, v, T, epsilons, gammas[n-1], 1/mass_diag_curr, compute_likelihoods_priors_gradients)
+        xnk, vnk, nlps, nlls = leapfrog(x, v, n_leapfrog, epsilons, gammas[n - 1], 1 / mass_diag_curr, compute_likelihoods_priors_gradients)
         verboseprint("\tTrajectories constructed.")
 
         # Check if there is any inf due to overflow error
         if not (np.all(np.isfinite(xnk)) and np.all(np.isfinite(vnk)) and
                 np.all(np.isfinite(nlps)) and np.all(np.isfinite(nlls))):
-            overflow_mask = np.any(~np.isfinite(xnk), axis=2) | np.any(~np.isfinite(vnk), axis=2) | ~np.isfinite(nlps) | ~np.isfinite(nlls) # (N, T+1)
+            overflow_mask = np.any(~np.isfinite(xnk), axis=2) | np.any(~np.isfinite(vnk), axis=2) | ~np.isfinite(nlps) | ~np.isfinite(nlls)  # (N, T+1)
             verboseprint(f"\tOverflow Detected. Trajectories affected: {overflow_mask.any(axis=1).sum()}")
             # When there is overflow do something
             if act_on_overflow:
@@ -371,7 +362,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                     verboseprint(f"\tOn Overflow changed Epsilon {key} to {value}.")
                 epsilon_params.update(dict_update)
         else:
-            overflow_mask = np.zeros((N, T+1), dtype=bool)
+            overflow_mask = np.zeros((n_particles, n_leapfrog + 1), dtype=bool)
 
         # Select next tempering parameter based on target ESS
         gammas.append(next_annealing_param(gamma=gammas[n-1], ESSrmin=ESSrmin, llk=(-nlls[:, 0])))
@@ -399,17 +390,17 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
         mass_diag_curr = mass_diag_next
 
         # Resample N particles out of N*(T+1) proportionally to unfolded weights
-        A = rng.choice(a=N*(T+1), size=N, replace=True, p=W_unfolded.ravel())  # (N, )
-        i_indices, k_indices = np.unravel_index(A, (N, T+1))  # (N, ) particles indices, (N, ) trajectory indices
+        A = rng.choice(a=n_particles * (n_leapfrog + 1), size=n_particles, replace=True, p=W_unfolded.ravel())  # (N, )
+        i_indices, k_indices = np.unravel_index(A, (n_particles, n_leapfrog + 1))  # (N, ) particles indices, (N, ) trajectory indices
         x = xnk[i_indices, k_indices]  # (N, d) resampled positions
-        verboseprint(f"\tParticles resampled. PM {np.sum(k_indices > 0) / N: .3f}")
+        verboseprint(f"\tParticles resampled. PM {np.sum(k_indices > 0) / n_particles: .3f}")
 
         # Refresh velocities
-        v = rng.normal(loc=0, scale=1, size=(N, d)) * np.sqrt(mass_diag_curr)
+        v = rng.normal(loc=0, scale=1, size=(n_particles, d)) * np.sqrt(mass_diag_curr)
         verboseprint("\tVelocities refreshed.")
 
         # Compute log-normalizing constant estimates
-        logLt += logsumexp(logw_folded) - np.log(N)
+        logLt += logsumexp(logw_folded) - np.log(n_particles)
         verboseprint(f"\tLogLt {logLt}")
 
         # Step size adaptation
@@ -418,12 +409,11 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
             old_mean = epsilon_params['mean']
             old_lambda = 9*old_mean / epsilon_params['skewness']**2
             estimate, lala, flag = estimate_with_cond_variance(xnk=xnk, logw=logw_criterion, epsilons=epsilons,
-                                                               ss=lambda e: e, skip_overflown=False,
-                                                               overflow_mask=overflow_mask)
+                                                               ss=lambda e: e)
             epsilon_params['mean'] = estimate
             new_lambda = 9*estimate / epsilon_params['skewness']**2
             try:
-                upsilons = logsumexp(lala.reshape(-1, T+1), axis=1) - np.log(T+1)  # (N, ...)
+                upsilons = logsumexp(lala.reshape(-1, n_leapfrog + 1), axis=1) - np.log(n_leapfrog + 1)  # (N, ...)
                 # upsilons = np.exp(upsilons)
                 # upsilons = upsilons / upsilons.sum()
                 # we just do this to have a better figure (maybe)
@@ -451,18 +441,18 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
                 xaxis_vals = np.linspace(epsilons.min(), 1.1*epsilons.max(), 1000)
                 # ax[0].plot(xaxis_vals, invgauss(mu=old_mean/old_lambda, loc=0, scale=old_lambda).pdf(xaxis_vals), color='lightcoral')
                 # ax[0].plot(xaxis_vals, invgauss(mu=estimate/new_lambda, loc=0, scale=new_lambda).pdf(xaxis_vals), color='lightseagreen')
-                #ax[1].hist2d(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (counts.max()), bins=30, zorder=0, label='upsilon')
-                # ax[1].hist2d(epsilons_fake, (shidted_upsilons_fake / shidted_upsilons_fake.max()) * counts.max(), bins=30, cmap='Blues', zorder=0)
+                # ax[1].hist2d(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (counts.max()), bins=30, zorder=0, label='upsilon')
+                # ax[1].hist2d(epsilons_fake, (shifted_upsilons_fake / shifted_upsilons_fake.max()) * counts.max(), bins=30, cmap='Blues', zorder=0)
                 hist2d = ax.hist2d(epsilons, upsilons, bins=30, zorder=0, cmap='Blues')
-                # ax[1].scatter(epsilons_fake, (shidted_upsilons_fake / shidted_upsilons_fake.max()) * counts.max(), alpha=0.5, zorder=0, color='gold', ec='goldenrod')
+                # ax[1].scatter(epsilons_fake, (shifted_upsilons_fake / shifted_upsilons_fake.max()) * counts.max(), alpha=0.5, zorder=0, color='gold', ec='goldenrod')
                 # ax[1].scatter(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (counts.max()), alpha=0.5, zorder=1, color='thistle', ec='violet')
                 ax2 = ax.twinx()
                 ax2.plot(xaxis_vals, invgauss(mu=old_mean/old_lambda, loc=0, scale=old_lambda).pdf(xaxis_vals), color='gold', zorder=1, lw=2, label=r'$\mathregular{\nu_{\theta_{n-1}}}$')
                 ax2.plot(xaxis_vals, invgauss(mu=estimate/new_lambda, loc=0, scale=new_lambda).pdf(xaxis_vals), color='indianred', zorder=2, lw=2, label=r'$\mathregular{\nu_{\theta_n}}$')
                 ax.set_xlabel(r"$\mathregular{\epsilon}$", fontsize=13)
-                ax.set_ylabel(r'$\mathregular{log\,\upsilon_{\gamma_{n-1}}(\epsilon, z)}$', fontsize=13) #"Criterion")
+                ax.set_ylabel(r'$\mathregular{log\,\upsilon_{\gamma_{n-1}}(\epsilon, z)}$', fontsize=13)  # "Criterion")
                 ax2.set_ylabel("Density", fontsize=13)
-                proxy_hist2d = mpatches.Patch(color='cornflowerblue', label=r'$\mathregular{\upsilon_{\gamma_{n-1}}(\epsilon, z)}$')
+                # proxy_hist2d = mpatches.Patch(color='cornflowerblue', label=r'$\mathregular{\upsilon_{\gamma_{n-1}}(\epsilon, z)}$')
                 handles, labels = ax2.get_legend_handles_labels()
                 # handles.append(proxy_hist2d)
                 # ax[1].scatter(epsilons, (shifted_upsilons / shifted_upsilons.max()) * (hist_out[0].max()), alpha=0.5, zorder=0, label='upsilon')
@@ -478,7 +468,7 @@ def hamiltonian_snippet(N: int, T: int, mass_diag: NDArray, ESSrmin: float, samp
             except ValueError:
                 print("\tSkipping plot.")
         # step_size = estimate_new_epsilon_mean(xnk=xnk, logw=logw_unfolded, epsilons=epsilons, ss=lambda _eps: _eps)
-        epsilons = sample_epsilons(eps_params=epsilon_params, N=N, rng=rng)
+        epsilons = sample_epsilons(eps_params=epsilon_params, n_grid=n_particles, rng=rng)
         verboseprint(f"\tEpsilon {epsilon_params['to_print'].capitalize()} {epsilon_params[epsilon_params['to_print']]}")
 
         # Storage
@@ -501,29 +491,28 @@ if __name__ == "__main__":
     scales[0] = 20
 
     # Define function to sample the prior
-    sample_prior = generate_sample_prior_function(_scales=scales)
-    compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function(_y=y, _Z=Z, _scales=scales)
+    _sample_prior = generate_sample_prior_function(_scales=scales)
+    _compute_likelihoods_priors_gradients = generate_nlp_gnlp_nll_and_gnll_function(_y=y, _Z=Z, _scales=scales)
 
     # Run Hamiltonian snippets
-    n_runs = 1 # 20
+    n_runs = 1  # 20
     overall_seed = np.random.randint(low=0, high=10000000000)
     seeds = np.random.default_rng(overall_seed).integers(low=1, high=10000000000, size=n_runs)
-    step_sizes = [0.001] #np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
+    step_sizes = [0.001]  # np.array(np.geomspace(start=0.001, stop=10.0, num=9))  # np.array() used only for pylint
     N = 1000
     T = 30
     skewness = 3  # a large skewness helps avoiding a large bias
     mass_matrix_adaptation = False
-    mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
-    verbose = True
-    skipo = False
+    _mass_diag = 1 / scales**2 if mass_matrix_adaptation else np.ones(61)
+    _verbose = True
     aoo = False
-    adapt_step_size = True
+    _adapt_step_size = True
 
     results = []
     for i in range(n_runs):
         print(f"Run: {i}")
         for eps_ix, eps in enumerate(step_sizes):
-            epsilon_params = {
+            _epsilon_params = {
                 'distribution': 'inv_gauss',
                 'skewness': skewness,
                 'mean': eps,
@@ -531,17 +520,17 @@ if __name__ == "__main__":
                 'to_print': 'mean',
                 'on_overflow': lambda param_dict: {'skewness': max(1, param_dict['skewness'] * 0.99)}
             }
-            res = {'N': N, 'T': T, 'epsilon_params': epsilon_params}
-            out = hamiltonian_snippet(N=N, T=T, mass_diag=mass_diag, ESSrmin=0.8,
-                                      sample_prior=sample_prior,
-                                      epsilon_params=epsilon_params,
+            res = {'N': N, 'T': T, 'epsilon_params': _epsilon_params}
+            out = hamiltonian_snippet(n_particles=N, n_leapfrog=T, mass_diag=_mass_diag, ESSrmin=0.8,
+                                      sample_prior=_sample_prior,
+                                      epsilon_params=_epsilon_params,
                                       act_on_overflow=aoo,
-                                      compute_likelihoods_priors_gradients=compute_likelihoods_priors_gradients,
-                                      adapt_mass=mass_matrix_adaptation, skip_overflown=skipo,
-                                      adapt_step_size=adapt_step_size,
-                                      verbose=verbose, seed=seeds[i])
+                                      compute_likelihoods_priors_gradients=_compute_likelihoods_priors_gradients,
+                                      adapt_mass=mass_matrix_adaptation,
+                                      adapt_step_size=_adapt_step_size,
+                                      verbose=_verbose, seed=seeds[i])
             res.update({'logLt': out['logLt'], 'out': out})
             print(f"\t\tEps: {eps: .7f} \tLogLt: {out['logLt']: .1f} \tFinal ESS: {out['ess'][-1]: .1f}"
-                  f"\tEps {epsilon_params['to_print'].capitalize()}: "
-                  f"{out['epsilon_params_history'][-1][epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
+                  f"\tEps {_epsilon_params['to_print'].capitalize()}: "
+                  f"{out['epsilon_params_history'][-1][_epsilon_params['to_print']]: .3f} Seed {int(seeds[i])} ")
             results.append(res)
